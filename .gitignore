@@ -1,0 +1,52 @@
+# Игнорировать виртуальное окружение
+venv/
+ENV/
+env/
+.venv/
+
+# Игнорировать временные файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Игнорировать логи
+*.log
+
+# Игнорировать настройки IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Игнорировать файлы системы
+.DS_Store
+Thumbs.db
+
+# Игнорировать файлы окружения и секретов
+.env
+*.env
+
+# Игнорировать билд артефакты
+build/
+dist/
+*.egg-info/
+
+# Игнорировать покрытия тестов
+htmlcov/
+coverage.xml
+.cache/
+
+# Игнорировать pytest кеши
+.pytest_cache/
+
+# Игнорировать профилировочные данные
+*.prof
+
+# Игнорировать базу данных SQLite (если вдруг используешь)
+*.sqlite3
+
+# Игнорировать Jupyter notebook чекпойнты
+.ipynb_checkpoints/
+
+# Игнорировать Docker мусор, если используешь
+docker-compose.override.yml
