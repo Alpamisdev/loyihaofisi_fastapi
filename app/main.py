@@ -26,7 +26,7 @@ app.add_middleware(
     allow_origins=["http://localhost:3000"],  # In production, replace with specific origins
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Disposition"],
 )
 
 # Include routers
