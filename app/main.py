@@ -70,7 +70,7 @@ async def login_for_access_token(
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-# New login endpoint with hardcoded credentials
+# Login endpoint with hardcoded credentials
 @app.post("/login", response_model=schemas.Token, tags=["authentication"])
 async def login(
     username: str = Body(...),
@@ -128,8 +128,6 @@ async def create_user(
 
 @app.get("/users/", response_model=list[schemas.AdminUser], tags=["users"])
 async def read_users(
-    skip: int = 0, 
-    limit: int = 100, 
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
@@ -140,7 +138,7 @@ async def read_users(
             detail="Not enough permissions"
         )
     
-    users = db.query(models.AdminUser).offset(skip).limit(limit).all()
+    users = db.query(models.AdminUser).all()
     return users
 
 # Error handlers
@@ -150,29 +148,6 @@ async def http_exception_handler(request, exc):
         status_code=exc.status_code,
         content={"detail": exc.detail},
     )
-
-# Initialize database with admin user if it doesn't exist
-@app.on_event("startup")
-async def startup_db_client():
-    db = next(get_db())
-    try:
-        # Check if admin user exists
-        admin = db.query(models.AdminUser).filter(models.AdminUser.username == "admin").first()
-        if not admin:
-            # Create admin user
-            hashed_password = auth.get_password_hash("admin")
-            admin_user = models.AdminUser(
-                username="admin",
-                password_hash=hashed_password,
-                role="admin"
-            )
-            db.add(admin_user)
-            db.commit()
-            print("Admin user created successfully.")
-        else:
-            print("Admin user already exists.")
-    finally:
-        db.close()
 
 # Create a directory for static files if it doesn't exist
 os.makedirs("static/uploads", exist_ok=True)

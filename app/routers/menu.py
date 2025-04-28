@@ -23,8 +23,9 @@ def create_menu_item(
     return db_menu
 
 @router.get("/", response_model=List[schemas.Menu])
-def read_menu_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    menu_items = db.query(models.Menu).offset(skip).limit(limit).all()
+def read_menu_items(db: Session = Depends(get_db)):
+    """Get all menu items without pagination"""
+    menu_items = db.query(models.Menu).all()
     return menu_items
 
 @router.get("/{menu_id}", response_model=schemas.Menu)

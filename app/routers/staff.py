@@ -23,8 +23,9 @@ def create_staff_member(
     return db_staff
 
 @router.get("/", response_model=List[schemas.Staff])
-def read_staff_members(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    staff = db.query(models.Staff).offset(skip).limit(limit).all()
+def read_staff_members(db: Session = Depends(get_db)):
+    """Get all staff members without pagination"""
+    staff = db.query(models.Staff).all()
     return staff
 
 @router.get("/{staff_id}", response_model=schemas.Staff)

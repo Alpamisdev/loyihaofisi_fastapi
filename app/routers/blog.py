@@ -24,8 +24,9 @@ def create_blog_category(
     return db_category
 
 @router.get("/categories/", response_model=List[schemas.BlogCategory])
-def read_blog_categories(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    categories = db.query(models.BlogCategory).offset(skip).limit(limit).all()
+def read_blog_categories(db: Session = Depends(get_db)):
+    """Get all blog categories without pagination"""
+    categories = db.query(models.BlogCategory).all()
     return categories
 
 @router.get("/categories/{category_id}", response_model=schemas.BlogCategory)
@@ -81,8 +82,9 @@ def create_blog_item(
     return db_blog_item
 
 @router.get("/items/", response_model=List[schemas.BlogItem])
-def read_blog_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    blog_items = db.query(models.BlogItem).offset(skip).limit(limit).all()
+def read_blog_items(db: Session = Depends(get_db)):
+    """Get all blog items without pagination"""
+    blog_items = db.query(models.BlogItem).all()
     return blog_items
 
 @router.get("/items/{blog_item_id}", response_model=schemas.BlogItem)
@@ -131,6 +133,7 @@ def delete_blog_item(
 
 # Get blog items by category
 @router.get("/categories/{category_id}/items", response_model=List[schemas.BlogItem])
-def read_blog_items_by_category(category_id: int, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    blog_items = db.query(models.BlogItem).filter(models.BlogItem.category_id == category_id).offset(skip).limit(limit).all()
+def read_blog_items_by_category(category_id: int, db: Session = Depends(get_db)):
+    """Get all blog items for a specific category without pagination"""
+    blog_items = db.query(models.BlogItem).filter(models.BlogItem.category_id == category_id).all()
     return blog_items
