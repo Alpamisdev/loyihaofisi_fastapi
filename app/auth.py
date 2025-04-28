@@ -64,3 +64,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     db.commit()
     
     return user
+
+# Function to authenticate with hardcoded credentials
+def authenticate_admin(username: str, password: str):
+    if username == "admin" and password == "admin123":
+        return True
+    return False
