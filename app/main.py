@@ -26,14 +26,24 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Configure CORS
+# # Configure CORS
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],  # Allow all origins for development, restrict in production
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+#     expose_headers=["Content-Disposition", "Content-Length", "Content-Type"],
+# )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development, restrict in production
+    allow_origins=["http://localhost:3000"],  # List specific origins
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition", "Content-Length", "Content-Type"],
+    max_age=600,
 )
 
 # Include routers
