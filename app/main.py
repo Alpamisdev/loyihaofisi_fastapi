@@ -11,6 +11,7 @@ from datetime import timedelta
 from . import models, schemas, auth
 from .database import engine, get_db
 from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads
+from .config import ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +26,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Configure CORS - Updated configuration
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "https://loyihaofisi.uz"],  # List each origin separately
@@ -74,7 +75,7 @@ async def login_for_access_token(
     # If database authentication fails, try hardcoded admin credentials
     if not user and form_data.username == "admin" and form_data.password == "admin123":
         logger.info("Using hardcoded admin credentials")
-        access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = auth.create_access_token(
             data={"sub": form_data.username}, expires_delta=access_token_expires
         )
@@ -90,7 +91,7 @@ async def login_for_access_token(
         )
     
     # Create and return access token
-    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
@@ -108,7 +109,7 @@ async def login(
     
     if auth.authenticate_admin(username, password):
         logger.info(f"Login successful for username: {username}")
-        access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = auth.create_access_token(
             data={"sub": username}, expires_delta=access_token_expires
         )

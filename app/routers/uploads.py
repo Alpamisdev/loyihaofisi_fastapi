@@ -5,7 +5,7 @@ from typing import List, Optional
 from .. import models, schemas, auth
 from ..database import get_db
 from ..utils.file_utils import save_upload_file, get_file_url, is_valid_image
-from ..config import BASE_URL
+from ..config import BASE_URL, MAX_UPLOAD_SIZE
 
 router = APIRouter(
     prefix="/uploads",
@@ -41,36 +41,50 @@ async def upload_image(
             detail="File is not a valid image. Supported formats: JPEG, PNG, GIF, WebP, SVG, BMP, TIFF"
         )
     
-    # Save the file
-    success, error_msg, file_path, file_size, mime_type = await save_upload_file(
-        file, folder=folder, convert_to_webp=True
-    )
-    
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to save file: {error_msg}"
+    # Check file size before reading the content
+    # Note: This is an approximation as UploadFile doesn't expose the file size directly
+    # The actual size check will happen when reading the file
+    try:
+        # Save the file
+        success, error_msg, file_path, file_size, mime_type = await save_upload_file(
+            file, folder=folder, convert_to_webp=True, max_size=MAX_UPLOAD_SIZE
         )
-    
-    # Generate the file URL using the configured BASE_URL
-    file_url = get_file_url(file_path)
-    
-    # Create a database record for the uploaded file
-    db_file = models.UploadedFile(
-        filename=file_path.split("/")[-1],
-        original_filename=file.filename,
-        file_path=file_path,
-        file_url=file_url,
-        file_size=file_size,
-        mime_type=mime_type,
-        uploaded_by=current_user.id if current_user else None
-    )
-    
-    db.add(db_file)
-    db.commit()
-    db.refresh(db_file)
-    
-    return db_file
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to save file: {error_msg}"
+            )
+        
+        # Generate the file URL using the configured BASE_URL
+        file_url = get_file_url(file_path)
+        
+        # Create a database record for the uploaded file
+        db_file = models.UploadedFile(
+            filename=file_path.split("/")[-1],
+            original_filename=file.filename,
+            file_path=file_path,
+            file_url=file_url,
+            file_size=file_size,
+            mime_type=mime_type,
+            uploaded_by=current_user.id if current_user else None
+        )
+        
+        db.add(db_file)
+        db.commit()
+        db.refresh(db_file)
+        
+        return db_file
+    except ValueError as e:
+        if "File too large" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_SIZE/(1024*1024):.1f}MB"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 @router.post("/files/", response_model=schemas.UploadedFile)
 async def upload_file(
@@ -93,36 +107,47 @@ async def upload_file(
     Returns:
         The uploaded file information
     """
-    # Save the file without conversion
-    success, error_msg, file_path, file_size, mime_type = await save_upload_file(
-        file, folder=folder, convert_to_webp=False
-    )
-    
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to save file: {error_msg}"
+    try:
+        # Save the file without conversion
+        success, error_msg, file_path, file_size, mime_type = await save_upload_file(
+            file, folder=folder, convert_to_webp=False, max_size=MAX_UPLOAD_SIZE
         )
-    
-    # Generate the file URL using the configured BASE_URL
-    file_url = get_file_url(file_path)
-    
-    # Create a database record for the uploaded file
-    db_file = models.UploadedFile(
-        filename=file_path.split("/")[-1],
-        original_filename=file.filename,
-        file_path=file_path,
-        file_url=file_url,
-        file_size=file_size,
-        mime_type=mime_type,
-        uploaded_by=current_user.id if current_user else None
-    )
-    
-    db.add(db_file)
-    db.commit()
-    db.refresh(db_file)
-    
-    return db_file
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to save file: {error_msg}"
+            )
+        
+        # Generate the file URL using the configured BASE_URL
+        file_url = get_file_url(file_path)
+        
+        # Create a database record for the uploaded file
+        db_file = models.UploadedFile(
+            filename=file_path.split("/")[-1],
+            original_filename=file.filename,
+            file_path=file_path,
+            file_url=file_url,
+            file_size=file_size,
+            mime_type=mime_type,
+            uploaded_by=current_user.id if current_user else None
+        )
+        
+        db.add(db_file)
+        db.commit()
+        db.refresh(db_file)
+        
+        return db_file
+    except ValueError as e:
+        if "File too large" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_SIZE/(1024*1024):.1f}MB"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 @router.get("/", response_model=List[schemas.UploadedFile])
 def get_uploaded_files(

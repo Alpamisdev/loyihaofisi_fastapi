@@ -17,7 +17,8 @@ def is_valid_image(file: UploadFile) -> bool:
 async def save_upload_file(
     upload_file: UploadFile, 
     folder: str = "uploads", 
-    convert_to_webp: bool = True
+    convert_to_webp: bool = True,
+    max_size: int = 10485760  # 10MB default
 ) -> Tuple[bool, str, Optional[str], Optional[int], Optional[str]]:
     """
     Save an uploaded file to the specified folder.
@@ -26,6 +27,7 @@ async def save_upload_file(
         upload_file: The uploaded file
         folder: The folder to save the file in
         convert_to_webp: Whether to convert images to WebP format
+        max_size: Maximum allowed file size in bytes
         
     Returns:
         Tuple containing:
@@ -39,8 +41,8 @@ async def save_upload_file(
         # Create folder if it doesn't exist
         os.makedirs(f"static/{folder}", exist_ok=True)
         
-        # Get file content
-        contents = await upload_file.read()
+        # Get file content with size limit
+        contents = await read_file_with_size_limit(upload_file, max_size)
         
         # Get original filename and extension
         original_filename = upload_file.filename
@@ -100,8 +102,45 @@ async def save_upload_file(
         file_size = os.path.getsize(file_path)
         
         return True, "", file_path, file_size, mime_type
+    except ValueError as e:
+        # Re-raise ValueError for specific handling
+        raise
     except Exception as e:
         return False, str(e), None, None, None
+
+async def read_file_with_size_limit(file: UploadFile, max_size: int) -> bytes:
+    """
+    Read a file with size limit.
+    
+    Args:
+        file: The uploaded file
+        max_size: Maximum allowed file size in bytes
+        
+    Returns:
+        The file content as bytes
+    
+    Raises:
+        ValueError: If the file is too large
+    """
+    # Read in chunks to check size
+    content = b""
+    chunk_size = 1024 * 1024  # 1MB
+    
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        
+        content += chunk
+        
+        # Check if the file is too large
+        if len(content) > max_size:
+            raise ValueError(f"File too large. Maximum allowed size is {max_size/(1024*1024):.1f}MB")
+    
+    # Reset file position for potential future reads
+    await file.seek(0)
+    
+    return content
 
 def get_file_url(file_path: str, base_url: Optional[str] = None) -> str:
     """
