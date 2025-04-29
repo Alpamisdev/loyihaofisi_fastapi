@@ -1,7 +1,6 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import OperationalError
 from typing import List, Optional
 import json
 from .. import models, schemas, auth
@@ -43,9 +42,6 @@ async def upload_image(
             detail="File is not a valid image. Supported formats: JPEG, PNG, GIF, WebP, SVG, BMP, TIFF"
         )
     
-    # Check file size before reading the content
-    # Note: This is an approximation as UploadFile doesn't expose the file size directly
-    # The actual size check will happen when reading the file
     try:
         # Save the file
         success, error_msg, file_path, file_size, mime_type = await save_upload_file(
@@ -61,51 +57,28 @@ async def upload_image(
         # Generate the file URL using the configured BASE_URL
         file_url = get_file_url(file_path)
         
-        # Create a database record for the uploaded file
-        try:
-            # Try to create with metadata fields
-            db_file = models.UploadedFile(
-                filename=file_path.split("/")[-1],
-                original_filename=file.filename,
-                file_path=file_path,
-                file_url=file_url,
-                file_size=file_size,
-                mime_type=mime_type,
-                uploaded_by=current_user.id if current_user else None,
-                title=None,
-                language=None,
-                info=None
-            )
-            
-            db.add(db_file)
-            db.commit()
-            db.refresh(db_file)
-            
-        except OperationalError as e:
-            # If metadata columns don't exist, create without them
-            if "no column named title" in str(e) or "no column named language" in str(e) or "no column named info" in str(e):
-                db.rollback()
-                
-                db_file = models.UploadedFile(
-                    filename=file_path.split("/")[-1],
-                    original_filename=file.filename,
-                    file_path=file_path,
-                    file_url=file_url,
-                    file_size=file_size,
-                    mime_type=mime_type,
-                    uploaded_by=current_user.id if current_user else None
-                )
-                
-                db.add(db_file)
-                db.commit()
-                db.refresh(db_file)
-                
-                # Inform the user that they need to add metadata columns
-                print("WARNING: Metadata columns (title, language, info) are missing from the uploaded_files table.")
-                print("Please run the add_metadata_columns.py script to add these columns.")
-            else:
-                # Re-raise if it's a different error
-                raise
+        # Create a database record for the uploaded file WITHOUT metadata fields
+        db_file = models.UploadedFile(
+            filename=file_path.split("/")[-1],
+            original_filename=file.filename,
+            file_path=file_path,
+            file_url=file_url,
+            file_size=file_size,
+            mime_type=mime_type,
+            uploaded_by=current_user.id if current_user else None
+        )
+        
+        # Remove any metadata attributes that might be set by the model
+        if hasattr(db_file, 'title'):
+            delattr(db_file, 'title')
+        if hasattr(db_file, 'language'):
+            delattr(db_file, 'language')
+        if hasattr(db_file, 'info'):
+            delattr(db_file, 'info')
+        
+        db.add(db_file)
+        db.commit()
+        db.refresh(db_file)
         
         return db_file
     except ValueError as e:
@@ -165,6 +138,14 @@ async def upload_file(
             mime_type=mime_type,
             uploaded_by=current_user.id if current_user else None
         )
+        
+        # Remove any metadata attributes that might be set by the model
+        if hasattr(db_file, 'title'):
+            delattr(db_file, 'title')
+        if hasattr(db_file, 'language'):
+            delattr(db_file, 'language')
+        if hasattr(db_file, 'info'):
+            delattr(db_file, 'info')
         
         db.add(db_file)
         db.commit()
@@ -251,172 +232,3 @@ def delete_uploaded_file(
     db.commit()
     
     return None
-
-# Keep your existing code and add this new endpoint:
-
-@router.post("/images/with-metadata/", response_model=schemas.ImageUploadResponse)
-async def upload_image_with_metadata(
-    request: Request,
-    image: UploadFile = File(...),
-    title: str = Form(...),
-    language: str = Form(...),
-    info: Optional[str] = Form(None),
-    folder: str = Form("images"),
-    db: Session = Depends(get_db),
-    current_user: Optional[models.AdminUser] = Depends(auth.get_current_user)
-):
-    """
-    Upload an image file with metadata, convert it to WebP format, and save it to the server.
-    
-    Args:
-        request: The request object
-        image: The uploaded image file
-        title: The title of the image
-        language: The language of the content
-        info: Additional information about the image
-        folder: The folder to save the file in (default: "images")
-        db: The database session
-        current_user: The current user
-        
-    Returns:
-        The uploaded file information with metadata
-    """
-    # Check if the file is an image
-    if not is_valid_image(image):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File is not a valid image. Supported formats: JPEG, PNG, GIF, WebP, SVG, BMP, TIFF"
-        )
-    
-    try:
-        # Save the file
-        success, error_msg, file_path, file_size, mime_type = await save_upload_file(
-            image, folder=folder, convert_to_webp=True, max_size=MAX_UPLOAD_SIZE
-        )
-        
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to save file: {error_msg}"
-            )
-        
-        # Generate the file URL using the configured BASE_URL
-        file_url = get_file_url(file_path)
-        
-        # Create a database record for the uploaded file with metadata
-        db_file = models.UploadedFile(
-            filename=file_path.split("/")[-1],
-            original_filename=image.filename,
-            file_path=file_path,
-            file_url=file_url,
-            file_size=file_size,
-            mime_type=mime_type,
-            uploaded_by=current_user.id if current_user else None,
-            title=title,
-            language=language,
-            info=info
-        )
-        
-        db.add(db_file)
-        db.commit()
-        db.refresh(db_file)
-        
-        return db_file
-    except ValueError as e:
-        if "File too large" in str(e):
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_SIZE/(1024*1024):.1f}MB"
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-# Alternative endpoint that accepts a JSON string for metadata
-@router.post("/images/with-json-metadata/", response_model=schemas.ImageUploadResponse)
-async def upload_image_with_json_metadata(
-    request: Request,
-    image: UploadFile = File(...),
-    metadata: str = Form(...),  # JSON string
-    folder: str = Form("images"),
-    db: Session = Depends(get_db),
-    current_user: Optional[models.AdminUser] = Depends(auth.get_current_user)
-):
-    """
-    Upload an image file with JSON metadata, convert it to WebP format, and save it to the server.
-    
-    Args:
-        request: The request object
-        image: The uploaded image file
-        metadata: JSON string containing title, language, and info
-        folder: The folder to save the file in (default: "images")
-        db: The database session
-        current_user: The current user
-        
-    Returns:
-        The uploaded file information with metadata
-    """
-    # Parse the metadata JSON
-    try:
-        metadata_dict = json.loads(metadata)
-        title = metadata_dict.get("title", "")
-        language = metadata_dict.get("language", "")
-        info = metadata_dict.get("info", "")
-    except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid JSON metadata"
-        )
-    
-    # Check if the file is an image
-    if not is_valid_image(image):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File is not a valid image. Supported formats: JPEG, PNG, GIF, WebP, SVG, BMP, TIFF"
-        )
-    
-    try:
-        # Save the file
-        success, error_msg, file_path, file_size, mime_type = await save_upload_file(
-            image, folder=folder, convert_to_webp=True, max_size=MAX_UPLOAD_SIZE
-        )
-        
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to save file: {error_msg}"
-            )
-        
-        # Generate the file URL using the configured BASE_URL
-        file_url = get_file_url(file_path)
-        
-        # Create a database record for the uploaded file with metadata
-        db_file = models.UploadedFile(
-            filename=file_path.split("/")[-1],
-            original_filename=image.filename,
-            file_path=file_path,
-            file_url=file_url,
-            file_size=file_size,
-            mime_type=mime_type,
-            uploaded_by=current_user.id if current_user else None,
-            title=title,
-            language=language,
-            info=info
-        )
-        
-        db.add(db_file)
-        db.commit()
-        db.refresh(db_file)
-        
-        return db_file
-    except ValueError as e:
-        if "File too large" in str(e):
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_SIZE/(1024*1024):.1f}MB"
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
