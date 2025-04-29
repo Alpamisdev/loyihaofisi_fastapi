@@ -9,7 +9,7 @@ from datetime import timedelta
 
 from . import models, schemas, auth
 from .database import engine, get_db
-from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links
+from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -20,14 +20,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Configure CORS
+# Add CORS middleware
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # In production, replace with specific origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["Authorization", "Content-Disposition"],
+  CORSMiddleware,
+  allow_origins=["http://localhost:3000", "http://localhost:5174", "https://admin-panel-qq-eco-social.netlify.app", "https://qq-ekonomika-social.netlify.app", "https://localhost:5173", "https://localhost:5174"],  # List specific origins instead of "*"
+  allow_credentials=True,
+  allow_methods=["*"],
+  allow_headers=["*"],
+  expose_headers=["Authorization", "Content-Disposition"],
 )
+
 
 # Include routers
 app.include_router(menu.router)
@@ -40,6 +42,7 @@ app.include_router(contacts.router)
 app.include_router(social_networks.router)
 app.include_router(year_name.router)
 app.include_router(menu_links.router)
+app.include_router(uploads.router)  # Add the uploads router
 
 # Root endpoint
 @app.get("/", tags=["root"])
@@ -149,8 +152,10 @@ async def http_exception_handler(request, exc):
         content={"detail": exc.detail},
     )
 
-# Create a directory for static files if it doesn't exist
+# Create directories for static files if they don't exist
 os.makedirs("static/uploads", exist_ok=True)
+os.makedirs("static/images", exist_ok=True)
+os.makedirs("static/files", exist_ok=True)
 
 # Mount static files directory
 app.mount("/static", StaticFiles(directory="static"), name="static")
