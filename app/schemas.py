@@ -103,6 +103,9 @@ class UploadedFile(UploadedFileBase):
     id: int
     created_at: datetime
     uploaded_by: Optional[int] = None
+    title: Optional[str] = None
+    language: Optional[str] = None
+    info: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -222,10 +225,34 @@ class AdminUser(AdminUserBase):
     class Config:
         from_attributes = True
 
-# Token schema for authentication
+# Token schemas
 class Token(BaseModel):
     access_token: str
     token_type: str
+    refresh_token: Optional[str] = None
+    expires_in: Optional[int] = None
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+
+# New schemas for refresh tokens
+class RefreshTokenBase(BaseModel):
+    token: str
+
+class RefreshTokenCreate(RefreshTokenBase):
+    user_id: int
+    expires_at: datetime
+
+class RefreshTokenResponse(RefreshTokenBase):
+    id: int
+    user_id: int
+    expires_at: datetime
+    created_at: datetime
+    revoked: bool
+    revoked_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+class TokenRefreshRequest(BaseModel):
+    refresh_token: str

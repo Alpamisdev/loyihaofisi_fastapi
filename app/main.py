@@ -6,12 +6,12 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import os
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from . import models, schemas, auth
 from .database import engine, get_db
 from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads
-from .config import ACCESS_TOKEN_EXPIRE_MINUTES
+from .config import ACCESS_TOKEN_EXPIRE_MINUTES, ACCESS_TOKEN_EXPIRE
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -75,11 +75,33 @@ async def login_for_access_token(
     # If database authentication fails, try hardcoded admin credentials
     if not user and form_data.username == "admin" and form_data.password == "admin123":
         logger.info("Using hardcoded admin credentials")
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = auth.create_access_token(
-            data={"sub": form_data.username}, expires_delta=access_token_expires
-        )
-        return {"access_token": access_token, "token_type": "bearer"}
+        
+        # Check if admin user exists in database
+        admin_user = db.query(models.AdminUser).filter(models.AdminUser.username == "admin").first()
+        
+        if not admin_user:
+            # Create admin user if it doesn't exist
+            hashed_password = auth.get_password_hash("admin123")
+            admin_user = models.AdminUser(
+                username="admin",
+                password_hash=hashed_password,
+                role="admin"
+            )
+            db.add(admin_user)
+            db.commit()
+            db.refresh(admin_user)
+            logger.info("Created admin user in database")
+        
+        # Create tokens
+        access_token, refresh_token, expires_in = auth.create_tokens(db, admin_user.id, admin_user.username)
+        
+        logger.info(f"Authentication successful for username: {form_data.username}")
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "refresh_token": refresh_token,
+            "expires_in": expires_in
+        }
     
     # If all authentication methods fail, raise an error
     if not user:
@@ -90,30 +112,55 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Create and return access token
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = auth.create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
+    # Create tokens
+    access_token, refresh_token, expires_in = auth.create_tokens(db, user.id, user.username)
+    
     logger.info(f"Authentication successful for username: {form_data.username}")
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "refresh_token": refresh_token,
+        "expires_in": expires_in
+    }
 
 # Login endpoint with hardcoded credentials
 @app.post("/login", response_model=schemas.Token, tags=["authentication"])
 async def login(
     username: str = Body(...),
-    password: str = Body(...)
+    password: str = Body(...),
+    db: Session = Depends(get_db)
 ):
     # Log authentication attempt
     logger.info(f"Login attempt for username: {username}")
     
     if auth.authenticate_admin(username, password):
         logger.info(f"Login successful for username: {username}")
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = auth.create_access_token(
-            data={"sub": username}, expires_delta=access_token_expires
-        )
-        return {"access_token": access_token, "token_type": "bearer"}
+        
+        # Check if admin user exists in database
+        admin_user = db.query(models.AdminUser).filter(models.AdminUser.username == "admin").first()
+        
+        if not admin_user:
+            # Create admin user if it doesn't exist
+            hashed_password = auth.get_password_hash("admin123")
+            admin_user = models.AdminUser(
+                username="admin",
+                password_hash=hashed_password,
+                role="admin"
+            )
+            db.add(admin_user)
+            db.commit()
+            db.refresh(admin_user)
+            logger.info("Created admin user in database")
+        
+        # Create tokens
+        access_token, refresh_token, expires_in = auth.create_tokens(db, admin_user.id, admin_user.username)
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "refresh_token": refresh_token,
+            "expires_in": expires_in
+        }
     else:
         logger.warning(f"Login failed for username: {username}")
         raise HTTPException(
@@ -121,6 +168,104 @@ async def login(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+@app.post("/refresh-token", response_model=schemas.Token, tags=["authentication"])
+async def refresh_access_token(
+    refresh_request: schemas.TokenRefreshRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Get a new access token using a refresh token.
+    
+    Args:
+        refresh_request: The refresh token request
+        db: The database session
+        
+    Returns:
+        A new access token and refresh token
+    """
+    # Get the refresh token from the database
+    db_token = auth.get_refresh_token(db, refresh_request.refresh_token)
+    
+    if not db_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Get the user
+    user = db.query(models.AdminUser).filter(models.AdminUser.id == db_token.user_id).first()
+    
+    if not user:
+        # Revoke the token if the user doesn't exist
+        auth.revoke_refresh_token(db, refresh_request.refresh_token)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Revoke the old refresh token
+    auth.revoke_refresh_token(db, refresh_request.refresh_token)
+    
+    # Create new tokens
+    access_token, refresh_token, expires_in = auth.create_tokens(db, user.id, user.username)
+    
+    logger.info(f"Token refreshed for user: {user.username}")
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "refresh_token": refresh_token,
+        "expires_in": expires_in
+    }
+
+@app.post("/logout", status_code=status.HTTP_204_NO_CONTENT, tags=["authentication"])
+async def logout(
+    refresh_token: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    """
+    Logout a user by revoking their refresh token.
+    
+    Args:
+        refresh_token: The refresh token to revoke
+        db: The database session
+        current_user: The current user
+        
+    Returns:
+        204 No Content
+    """
+    # Revoke the refresh token
+    auth.revoke_refresh_token(db, refresh_token)
+    
+    logger.info(f"User logged out: {current_user.username}")
+    
+    return None
+
+@app.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT, tags=["authentication"])
+async def logout_all(
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    """
+    Logout a user from all devices by revoking all their refresh tokens.
+    
+    Args:
+        db: The database session
+        current_user: The current user
+        
+    Returns:
+        204 No Content
+    """
+    # Revoke all refresh tokens for the user
+    count = auth.revoke_all_user_refresh_tokens(db, current_user.id)
+    
+    logger.info(f"User logged out from all devices: {current_user.username} (revoked {count} tokens)")
+    
+    return None
 
 @app.get("/users/me/", response_model=schemas.AdminUser, tags=["users"])
 async def read_users_me(current_user: models.AdminUser = Depends(auth.get_current_user)):

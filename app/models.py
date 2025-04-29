@@ -159,6 +159,9 @@ class AdminUser(Base):
     role = Column(String, default="admin")
     created_at = Column(DateTime, default=func.now())
     last_login = Column(DateTime, nullable=True)
+    
+    # Add relationship to refresh tokens
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
 
 # Uploaded Files
 class UploadedFile(Base):
@@ -178,3 +181,18 @@ class UploadedFile(Base):
     title = Column(String, nullable=True)
     language = Column(String, nullable=True)
     info = Column(Text, nullable=True)
+
+# Refresh Tokens
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String, unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("admin_users.id"), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    revoked = Column(Boolean, default=False)
+    revoked_at = Column(DateTime, nullable=True)
+    
+    # Relationship to user
+    user = relationship("AdminUser", back_populates="refresh_tokens")
