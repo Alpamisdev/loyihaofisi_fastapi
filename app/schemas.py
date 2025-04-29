@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 
 # Import EmailStr conditionally to avoid errors if email-validator is not installed
@@ -207,10 +207,35 @@ class AdminUser(AdminUserBase):
     class Config:
         from_attributes = True
 
-# Token schema for authentication
+# Token schemas for authentication
 class Token(BaseModel):
     access_token: str
     token_type: str
+    refresh_token: Optional[str] = None
+    expires_in: Optional[int] = None  # Seconds until the access token expires
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+
+# New schemas for refresh token
+class RefreshTokenCreate(BaseModel):
+    user_id: int
+    device_info: Optional[str] = None
+    ip_address: Optional[str] = None
+
+class RefreshToken(BaseModel):
+    id: int
+    user_id: int
+    expires_at: datetime
+    created_at: datetime
+    device_info: Optional[str] = None
+    revoked: bool = False
+    
+    class Config:
+        from_attributes = True
+
+class TokenRefreshRequest(BaseModel):
+    refresh_token: str
+
+class TokenRevokeRequest(BaseModel):
+    refresh_token: str

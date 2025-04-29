@@ -10,8 +10,8 @@ from datetime import timedelta
 
 from . import models, schemas, auth
 from .database import engine, get_db
-from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads
-from .config import ACCESS_TOKEN_EXPIRE_MINUTES
+from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads, token
+from .config import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -47,7 +47,8 @@ app.include_router(contacts.router)
 app.include_router(social_networks.router)
 app.include_router(year_name.router)
 app.include_router(menu_links.router)
-app.include_router(uploads.router)  # Add the uploads router
+app.include_router(uploads.router)
+app.include_router(token.router)  # Add the token router for refresh token operations
 
 # Root endpoint
 @app.get("/", tags=["root"])
@@ -75,11 +76,17 @@ async def login_for_access_token(
     # If database authentication fails, try hardcoded admin credentials
     if not user and form_data.username == "admin" and form_data.password == "admin123":
         logger.info("Using hardcoded admin credentials")
+        # Create access token with hardcoded credentials
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = auth.create_access_token(
             data={"sub": form_data.username}, expires_delta=access_token_expires
         )
-        return {"access_token": access_token, "token_type": "bearer"}
+        # Return token without refresh token for hardcoded admin
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
+        }
     
     # If all authentication methods fail, raise an error
     if not user:
@@ -95,32 +102,73 @@ async def login_for_access_token(
     access_token = auth.create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
+    
+    # Generate refresh token
+    refresh_token, _ = auth.create_refresh_token(db, user.id, request)
+    
     logger.info(f"Authentication successful for username: {form_data.username}")
-    return {"access_token": access_token, "token_type": "bearer"}
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "refresh_token": refresh_token,
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
+    }
 
 # Login endpoint with hardcoded credentials
 @app.post("/login", response_model=schemas.Token, tags=["authentication"])
 async def login(
+    request: Request,
     username: str = Body(...),
     password: str = Body(...)
 ):
     # Log authentication attempt
     logger.info(f"Login attempt for username: {username}")
     
-    if auth.authenticate_admin(username, password):
-        logger.info(f"Login successful for username: {username}")
+    # Try to authenticate with database
+    db = next(get_db())
+    user = auth.authenticate_user(db, username, password)
+    
+    # If database authentication fails, try hardcoded credentials
+    if not user and auth.authenticate_admin(username, password):
+        logger.info(f"Login successful for username: {username} (hardcoded)")
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = auth.create_access_token(
             data={"sub": username}, expires_delta=access_token_expires
         )
-        return {"access_token": access_token, "token_type": "bearer"}
-    else:
+        # Return token without refresh token for hardcoded admin
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
+        }
+    
+    # If all authentication methods fail, raise an error
+    if not user:
         logger.warning(f"Login failed for username: {username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    
+    # Generate refresh token
+    refresh_token, _ = auth.create_refresh_token(db, user.id, request)
+    
+    logger.info(f"Login successful for username: {username}")
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "refresh_token": refresh_token,
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
+    }
 
 @app.get("/users/me/", response_model=schemas.AdminUser, tags=["users"])
 async def read_users_me(current_user: models.AdminUser = Depends(auth.get_current_user)):
@@ -173,6 +221,23 @@ async def read_users(
     
     users = db.query(models.AdminUser).all()
     return users
+
+# Maintenance endpoint to clean expired tokens
+@app.post("/maintenance/clean-expired-tokens", tags=["maintenance"])
+async def clean_expired_tokens(
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    # Only admin users can access this endpoint
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    # Clean expired tokens
+    removed = auth.clean_expired_tokens(db)
+    return {"message": f"Removed {removed} expired tokens"}
 
 # Error handlers
 @app.exception_handler(HTTPException)
