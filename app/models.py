@@ -173,3 +173,8 @@ class UploadedFile(Base):
     mime_type = Column(String)
     created_at = Column(DateTime, default=func.now())
     uploaded_by = Column(Integer, ForeignKey("admin_users.id"), nullable=True)
+    
+    # Add these new fields for metadata
+    title = Column(String, nullable=True)
+    language = Column(String, nullable=True)
+    info = Column(Text, nullable=True)

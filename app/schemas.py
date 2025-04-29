@@ -107,6 +107,21 @@ class UploadedFile(UploadedFileBase):
     class Config:
         from_attributes = True
 
+# Add these new schemas to your existing schemas.py file
+
+class ImageMetadataBase(BaseModel):
+    title: str
+    language: str
+    info: Optional[str] = None
+
+class ImageUploadResponse(UploadedFile):
+    title: str
+    language: str
+    info: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
 # Response schemas (including id and other auto-generated fields)
 class Menu(MenuBase):
     id: int
