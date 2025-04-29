@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from . import models, schemas
 from .database import get_db
-from .config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE, REFRESH_TOKEN_EXPIRE
+from .config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -52,8 +52,8 @@ def create_refresh_token(db: Session, user_id: int) -> str:
     # Generate a unique token
     token = str(uuid.uuid4())
     
-    # Calculate expiration date
-    expires_at = datetime.utcnow() + REFRESH_TOKEN_EXPIRE
+    # Calculate expiration date (30 days)
+    expires_at = datetime.utcnow() + timedelta(days=30)
     
     # Create refresh token in database
     db_token = models.RefreshToken(
@@ -147,7 +147,7 @@ def create_tokens(db: Session, user_id: int, username: str) -> Tuple[str, str, i
         A tuple containing the access token, refresh token, and access token expiry in seconds
     """
     # Create access token
-    access_token_expires = ACCESS_TOKEN_EXPIRE
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": username}, expires_delta=access_token_expires
     )

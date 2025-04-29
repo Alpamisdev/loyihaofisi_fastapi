@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from . import models, schemas, auth
 from .database import engine, get_db
 from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads
-from .config import ACCESS_TOKEN_EXPIRE_MINUTES, ACCESS_TOKEN_EXPIRE
+from .config import ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
