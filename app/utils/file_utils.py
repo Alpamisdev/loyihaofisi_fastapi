@@ -126,6 +126,9 @@ async def read_file_with_size_limit(file: UploadFile, max_size: int) -> bytes:
     content = b""
     chunk_size = 1024 * 1024  # 1MB
     
+    # Reset file position to start
+    await file.seek(0)
+    
     while True:
         chunk = await file.read(chunk_size)
         if not chunk:
@@ -135,6 +138,7 @@ async def read_file_with_size_limit(file: UploadFile, max_size: int) -> bytes:
         
         # Check if the file is too large
         if len(content) > max_size:
+            await file.seek(0)  # Reset file position
             raise ValueError(f"File too large. Maximum allowed size is {max_size/(1024*1024):.1f}MB")
     
     # Reset file position for potential future reads

@@ -41,9 +41,6 @@ async def upload_image(
             detail="File is not a valid image. Supported formats: JPEG, PNG, GIF, WebP, SVG, BMP, TIFF"
         )
     
-    # Check file size before reading the content
-    # Note: This is an approximation as UploadFile doesn't expose the file size directly
-    # The actual size check will happen when reading the file
     try:
         # Save the file
         success, error_msg, file_path, file_size, mime_type = await save_upload_file(
@@ -61,7 +58,7 @@ async def upload_image(
         
         # Create a database record for the uploaded file
         db_file = models.UploadedFile(
-            filename=file_path.split("/")[-1],
+            filename=os.path.basename(file_path),
             original_filename=file.filename,
             file_path=file_path,
             file_url=file_url,
@@ -124,7 +121,7 @@ async def upload_file(
         
         # Create a database record for the uploaded file
         db_file = models.UploadedFile(
-            filename=file_path.split("/")[-1],
+            filename=os.path.basename(file_path),
             original_filename=file.filename,
             file_path=file_path,
             file_url=file_url,
