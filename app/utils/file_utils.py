@@ -7,17 +7,7 @@ from fastapi import UploadFile
 from PIL import Image
 import io
 from slugify import slugify
-
-# Define allowed image mime types
-ALLOWED_IMAGE_TYPES = [
-    "image/jpeg", 
-    "image/png", 
-    "image/gif", 
-    "image/webp", 
-    "image/svg+xml", 
-    "image/bmp", 
-    "image/tiff"
-]
+from ..config import ALLOWED_IMAGE_TYPES, BASE_URL
 
 def is_valid_image(file: UploadFile) -> bool:
     """Check if the uploaded file is a valid image."""
@@ -130,8 +120,13 @@ def get_file_url(file_path: str, base_url: Optional[str] = None) -> str:
     # Remove 'static/' from the beginning of the path
     url_path = file_path[7:]
     
-    # If base_url is provided, use it, otherwise use relative path
-    if base_url:
+    # Use the configured BASE_URL if available, otherwise use the provided base_url
+    if BASE_URL:
+        if BASE_URL.endswith('/'):
+            return f"{BASE_URL}static/{url_path}"
+        else:
+            return f"{BASE_URL}/static/{url_path}"
+    elif base_url:
         if base_url.endswith('/'):
             return f"{base_url}static/{url_path}"
         else:

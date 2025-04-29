@@ -1,15 +1,20 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Body
+from fastapi import FastAPI, Depends, HTTPException, status, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import os
+import logging
 from datetime import timedelta
 
 from . import models, schemas, auth
 from .database import engine, get_db
 from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -23,10 +28,11 @@ app = FastAPI(
 # Configure CORS - Updated configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # List each origin separately
+    allow_origins=["http://localhost:3000", "https://loyihaofisi.uz"],  # List each origin separately
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["Authorization", "Content-Disposition"],
+    allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Include routers
@@ -55,20 +61,40 @@ def health_check():
 # Authentication endpoints
 @app.post("/token", response_model=schemas.Token, tags=["authentication"])
 async def login_for_access_token(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
+    # Log authentication attempt
+    logger.info(f"Authentication attempt for username: {form_data.username}")
+    
+    # Try to authenticate with database
     user = auth.authenticate_user(db, form_data.username, form_data.password)
+    
+    # If database authentication fails, try hardcoded admin credentials
+    if not user and form_data.username == "admin" and form_data.password == "admin123":
+        logger.info("Using hardcoded admin credentials")
+        access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = auth.create_access_token(
+            data={"sub": form_data.username}, expires_delta=access_token_expires
+        )
+        return {"access_token": access_token, "token_type": "bearer"}
+    
+    # If all authentication methods fail, raise an error
     if not user:
+        logger.warning(f"Authentication failed for username: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # Create and return access token
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
+    logger.info(f"Authentication successful for username: {form_data.username}")
     return {"access_token": access_token, "token_type": "bearer"}
 
 # Login endpoint with hardcoded credentials
@@ -77,13 +103,18 @@ async def login(
     username: str = Body(...),
     password: str = Body(...)
 ):
+    # Log authentication attempt
+    logger.info(f"Login attempt for username: {username}")
+    
     if auth.authenticate_admin(username, password):
+        logger.info(f"Login successful for username: {username}")
         access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = auth.create_access_token(
             data={"sub": username}, expires_delta=access_token_expires
         )
         return {"access_token": access_token, "token_type": "bearer"}
     else:
+        logger.warning(f"Login failed for username: {username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -161,4 +192,4 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Run the application
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="127.0.0.1", port=5001, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

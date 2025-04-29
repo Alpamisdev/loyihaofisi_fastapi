@@ -5,6 +5,7 @@ from typing import List, Optional
 from .. import models, schemas, auth
 from ..database import get_db
 from ..utils.file_utils import save_upload_file, get_file_url, is_valid_image
+from ..config import BASE_URL
 
 router = APIRouter(
     prefix="/uploads",
@@ -51,11 +52,8 @@ async def upload_image(
             detail=f"Failed to save file: {error_msg}"
         )
     
-    # Get the base URL from the request
-    base_url = str(request.base_url)
-    
-    # Generate the file URL
-    file_url = get_file_url(file_path, base_url)
+    # Generate the file URL using the configured BASE_URL
+    file_url = get_file_url(file_path)
     
     # Create a database record for the uploaded file
     db_file = models.UploadedFile(
@@ -106,11 +104,8 @@ async def upload_file(
             detail=f"Failed to save file: {error_msg}"
         )
     
-    # Get the base URL from the request
-    base_url = str(request.base_url)
-    
-    # Generate the file URL
-    file_url = get_file_url(file_path, base_url)
+    # Generate the file URL using the configured BASE_URL
+    file_url = get_file_url(file_path)
     
     # Create a database record for the uploaded file
     db_file = models.UploadedFile(
