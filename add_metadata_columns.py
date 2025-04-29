@@ -2,9 +2,7 @@
 import os
 import sys
 import logging
-from sqlalchemy import create_engine, Column, String, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
 # Configure logging
@@ -18,7 +16,13 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, script_dir)
 
 # Import the database connection
-from app.database import engine
+try:
+    from app.database import engine
+    logger.info("Using imported engine from app.database")
+except ImportError:
+    # If import fails, create a new engine
+    logger.info("Creating new engine")
+    engine = create_engine("sqlite:///./website.db", connect_args={"check_same_thread": False})
 
 def add_metadata_columns():
     """Add metadata columns to the uploaded_files table."""
@@ -27,23 +31,48 @@ def add_metadata_columns():
         conn = engine.connect()
         
         # Check if columns already exist
-        inspector = sa.inspect(engine)
-        columns = [col['name'] for col in inspector.get_columns('uploaded_files')]
+        try:
+            # Try to select from the columns to check if they exist
+            conn.execute(text("SELECT title FROM uploaded_files LIMIT 1"))
+            logger.info("Column 'title' already exists")
+            title_exists = True
+        except SQLAlchemyError:
+            logger.info("Column 'title' does not exist")
+            title_exists = False
+            
+        try:
+            conn.execute(text("SELECT language FROM uploaded_files LIMIT 1"))
+            logger.info("Column 'language' already exists")
+            language_exists = True
+        except SQLAlchemyError:
+            logger.info("Column 'language' does not exist")
+            language_exists = False
+            
+        try:
+            conn.execute(text("SELECT info FROM uploaded_files LIMIT 1"))
+            logger.info("Column 'info' already exists")
+            info_exists = True
+        except SQLAlchemyError:
+            logger.info("Column 'info' does not exist")
+            info_exists = False
         
         # Add title column if it doesn't exist
-        if 'title' not in columns:
+        if not title_exists:
             logger.info("Adding 'title' column to uploaded_files table...")
-            conn.execute(sa.text("ALTER TABLE uploaded_files ADD COLUMN title VARCHAR;"))
+            conn.execute(text("ALTER TABLE uploaded_files ADD COLUMN title VARCHAR"))
         
         # Add language column if it doesn't exist
-        if 'language' not in columns:
+        if not language_exists:
             logger.info("Adding 'language' column to uploaded_files table...")
-            conn.execute(sa.text("ALTER TABLE uploaded_files ADD COLUMN language VARCHAR;"))
+            conn.execute(text("ALTER TABLE uploaded_files ADD COLUMN language VARCHAR"))
         
         # Add info column if it doesn't exist
-        if 'info' not in columns:
+        if not info_exists:
             logger.info("Adding 'info' column to uploaded_files table...")
-            conn.execute(sa.text("ALTER TABLE uploaded_files ADD COLUMN info TEXT;"))
+            conn.execute(text("ALTER TABLE uploaded_files ADD COLUMN info TEXT"))
+        
+        # Commit the transaction
+        conn.commit()
         
         logger.info("Metadata columns added successfully.")
         conn.close()
@@ -53,5 +82,4 @@ def add_metadata_columns():
         sys.exit(1)
 
 if __name__ == "__main__":
-    import sqlalchemy as sa
     add_metadata_columns()

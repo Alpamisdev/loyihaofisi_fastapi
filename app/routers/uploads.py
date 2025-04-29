@@ -1,6 +1,7 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 from typing import List, Optional
 import json
 from .. import models, schemas, auth
@@ -61,19 +62,50 @@ async def upload_image(
         file_url = get_file_url(file_path)
         
         # Create a database record for the uploaded file
-        db_file = models.UploadedFile(
-            filename=file_path.split("/")[-1],
-            original_filename=file.filename,
-            file_path=file_path,
-            file_url=file_url,
-            file_size=file_size,
-            mime_type=mime_type,
-            uploaded_by=current_user.id if current_user else None
-        )
-        
-        db.add(db_file)
-        db.commit()
-        db.refresh(db_file)
+        try:
+            # Try to create with metadata fields
+            db_file = models.UploadedFile(
+                filename=file_path.split("/")[-1],
+                original_filename=file.filename,
+                file_path=file_path,
+                file_url=file_url,
+                file_size=file_size,
+                mime_type=mime_type,
+                uploaded_by=current_user.id if current_user else None,
+                title=None,
+                language=None,
+                info=None
+            )
+            
+            db.add(db_file)
+            db.commit()
+            db.refresh(db_file)
+            
+        except OperationalError as e:
+            # If metadata columns don't exist, create without them
+            if "no column named title" in str(e) or "no column named language" in str(e) or "no column named info" in str(e):
+                db.rollback()
+                
+                db_file = models.UploadedFile(
+                    filename=file_path.split("/")[-1],
+                    original_filename=file.filename,
+                    file_path=file_path,
+                    file_url=file_url,
+                    file_size=file_size,
+                    mime_type=mime_type,
+                    uploaded_by=current_user.id if current_user else None
+                )
+                
+                db.add(db_file)
+                db.commit()
+                db.refresh(db_file)
+                
+                # Inform the user that they need to add metadata columns
+                print("WARNING: Metadata columns (title, language, info) are missing from the uploaded_files table.")
+                print("Please run the add_metadata_columns.py script to add these columns.")
+            else:
+                # Re-raise if it's a different error
+                raise
         
         return db_file
     except ValueError as e:
