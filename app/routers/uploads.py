@@ -68,13 +68,10 @@ async def upload_image(
             uploaded_by=current_user.id if current_user else None
         )
         
-        # Remove any metadata attributes that might be set by the model
-        if hasattr(db_file, 'title'):
-            delattr(db_file, 'title')
-        if hasattr(db_file, 'language'):
-            delattr(db_file, 'language')
-        if hasattr(db_file, 'info'):
-            delattr(db_file, 'info')
+        # Set metadata attributes to None instead of trying to delete them
+        db_file.title = None
+        db_file.language = None
+        db_file.info = None
         
         db.add(db_file)
         db.commit()
@@ -139,13 +136,10 @@ async def upload_file(
             uploaded_by=current_user.id if current_user else None
         )
         
-        # Remove any metadata attributes that might be set by the model
-        if hasattr(db_file, 'title'):
-            delattr(db_file, 'title')
-        if hasattr(db_file, 'language'):
-            delattr(db_file, 'language')
-        if hasattr(db_file, 'info'):
-            delattr(db_file, 'info')
+        # Set metadata attributes to None instead of trying to delete them
+        db_file.title = None
+        db_file.language = None
+        db_file.info = None
         
         db.add(db_file)
         db.commit()
