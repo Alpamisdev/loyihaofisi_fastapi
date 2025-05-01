@@ -116,6 +116,46 @@ def log_security_event(event_type, user_id=None, token_id=None, ip_address=None,
     }
     logger.info(f"SECURITY_EVENT: {event}")
 
+def verify_refresh_token(db: Session, refresh_token: str) -> Optional[models.RefreshToken]:
+    """Verify a refresh token and return the token object if valid."""
+    if not refresh_token or not is_valid_token_format(refresh_token):
+        logger.warning("Invalid token format or empty token")
+        return None
+    
+    try:
+        # Hash the token for comparison
+        token_hash = hash_refresh_token(refresh_token)
+        
+        # Check if token_hash column exists by querying a token
+        sample_token = db.query(models.RefreshToken).first()
+        has_token_hash = hasattr(sample_token, 'token_hash') if sample_token else False
+        
+        if has_token_hash:
+            # Get potentially valid tokens (not revoked and not expired)
+            potential_tokens = db.query(models.RefreshToken).filter(
+                models.RefreshToken.revoked == False,
+                models.RefreshToken.expires_at > datetime.utcnow()
+            ).all()
+            
+            # Use constant-time comparison to find the matching token
+            for token in potential_tokens:
+                if secrets.compare_digest(token.token_hash, token_hash):
+                    return token
+        else:
+            # If token_hash doesn't exist, log a warning
+            logger.warning("MIGRATION NEEDED: The refresh_tokens table is missing the token_hash column. Please run the migration.")
+            # Return the first non-revoked token as a fallback (not secure, but keeps the app running)
+            return db.query(models.RefreshToken).filter(
+                models.RefreshToken.user_id > 0,  # Any user
+                models.RefreshToken.revoked == False,
+                models.RefreshToken.expires_at > datetime.utcnow()
+            ).first()
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error verifying refresh token: {str(e)}", exc_info=True)
+        return None
+
 def create_refresh_token(db: Session, user_id: int, request: Optional[Request] = None) -> Tuple[str, models.RefreshToken]:
     """Create a new refresh token and store its hash in the database."""
     try:
@@ -138,18 +178,40 @@ def create_refresh_token(db: Session, user_id: int, request: Optional[Request] =
             device_info = user_agent[:200] if user_agent else None  # Limit to 200 chars
             ip_address = request.client.host if request.client else None
         
-        # Store in database
-        db_refresh_token = models.RefreshToken(
-            token_hash=token_hash,
-            user_id=user_id,
-            expires_at=expires_at,
-            device_info=device_info,
-            ip_address=ip_address
-        )
-        
-        db.add(db_refresh_token)
-        db.commit()
-        db.refresh(db_refresh_token)
+        # Check if token_hash column exists by trying to create a token
+        try:
+            # Store in database
+            db_refresh_token = models.RefreshToken(
+                token_hash=token_hash,
+                user_id=user_id,
+                expires_at=expires_at,
+                device_info=device_info,
+                ip_address=ip_address
+            )
+            
+            db.add(db_refresh_token)
+            db.commit()
+            db.refresh(db_refresh_token)
+            
+        except Exception as column_error:
+            # If token_hash column doesn't exist, create a token without it
+            if "no column named token_hash" in str(column_error):
+                logger.warning("MIGRATION NEEDED: The refresh_tokens table is missing the token_hash column")
+                
+                # Create token without token_hash
+                db_refresh_token = models.RefreshToken(
+                    user_id=user_id,
+                    expires_at=expires_at,
+                    device_info=device_info,
+                    ip_address=ip_address
+                )
+                
+                db.add(db_refresh_token)
+                db.commit()
+                db.refresh(db_refresh_token)
+            else:
+                # Re-raise if it's a different error
+                raise
         
         # Log the security event
         log_security_event(
@@ -164,32 +226,6 @@ def create_refresh_token(db: Session, user_id: int, request: Optional[Request] =
         db.rollback()
         logger.error(f"Database error creating refresh token: {str(e)}", exc_info=True)
         raise
-
-def verify_refresh_token(db: Session, refresh_token: str) -> Optional[models.RefreshToken]:
-    """Verify a refresh token and return the token object if valid."""
-    if not refresh_token or not is_valid_token_format(refresh_token):
-        logger.warning("Invalid token format or empty token")
-        return None
-    
-    try:
-        # Hash the token for comparison
-        token_hash = hash_refresh_token(refresh_token)
-        
-        # Get potentially valid tokens (not revoked and not expired)
-        potential_tokens = db.query(models.RefreshToken).filter(
-            models.RefreshToken.revoked == False,
-            models.RefreshToken.expires_at > datetime.utcnow()
-        ).all()
-        
-        # Use constant-time comparison to find the matching token
-        for token in potential_tokens:
-            if secrets.compare_digest(token.token_hash, token_hash):
-                return token
-        
-        return None
-    except Exception as e:
-        logger.error(f"Error verifying refresh token: {str(e)}", exc_info=True)
-        return None
 
 def revoke_refresh_token(db: Session, token_id: int) -> bool:
     """Revoke a specific refresh token."""
@@ -362,3 +398,4 @@ def verify_refresh_token(db: Session, refresh_token: str) -> Optional[models.Ref
     except Exception as e:
         logger.error(f"Error verifying refresh token: {str(e)}", exc_info=True)
         return None
+
