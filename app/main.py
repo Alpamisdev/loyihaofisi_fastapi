@@ -101,16 +101,23 @@ async def login_for_access_token(
             data={"sub": form_data.username}, expires_delta=access_token_expires
         )
         
-        # Generate refresh token
-        refresh_token, db_refresh_token = auth.create_refresh_token(db, admin_user.id, request)
+        # Generate refresh token - handle errors gracefully
+        try:
+            refresh_token, db_refresh_token = auth.create_refresh_token(db, admin_user.id, request)
+        except Exception as e:
+            logger.error(f"Error creating refresh token: {str(e)}")
+            refresh_token = None
         
         # Log the event
-        auth.log_security_event(
-            "login_success_hardcoded", 
-            user_id=admin_user.id,
-            token_id=db_refresh_token.id,
-            ip_address=request.client.host if request.client else None
-        )
+        try:
+            auth.log_security_event(
+                "login_success_hardcoded", 
+                user_id=admin_user.id,
+                token_id=getattr(db_refresh_token, 'id', 0) if 'db_refresh_token' in locals() else 0,
+                ip_address=request.client.host if request.client else None
+            )
+        except Exception as e:
+            logger.warning(f"Could not log security event: {str(e)}")
         
         return {
             "access_token": access_token,
@@ -124,11 +131,14 @@ async def login_for_access_token(
         logger.warning(f"Authentication failed for username: {form_data.username}")
         
         # Log the failed attempt
-        auth.log_security_event(
-            "login_failed", 
-            ip_address=request.client.host if request.client else None,
-            details={"username": form_data.username}
-        )
+        try:
+            auth.log_security_event(
+                "login_failed", 
+                ip_address=request.client.host if request.client else None,
+                details={"username": form_data.username}
+            )
+        except Exception as e:
+            logger.warning(f"Could not log security event: {str(e)}")
         
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -142,16 +152,23 @@ async def login_for_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     
-    # Generate refresh token
-    refresh_token, db_refresh_token = auth.create_refresh_token(db, user.id, request)
+    # Generate refresh token - handle errors gracefully
+    try:
+        refresh_token, db_refresh_token = auth.create_refresh_token(db, user.id, request)
+    except Exception as e:
+        logger.error(f"Error creating refresh token: {str(e)}")
+        refresh_token = None
     
     # Log the successful login
-    auth.log_security_event(
-        "login_success", 
-        user_id=user.id,
-        token_id=db_refresh_token.id,
-        ip_address=request.client.host if request.client else None
-    )
+    try:
+        auth.log_security_event(
+            "login_success", 
+            user_id=user.id,
+            token_id=getattr(db_refresh_token, 'id', 0) if 'db_refresh_token' in locals() else 0,
+            ip_address=request.client.host if request.client else None
+        )
+    except Exception as e:
+        logger.warning(f"Could not log security event: {str(e)}")
     
     logger.info(f"Authentication successful for username: {form_data.username}")
     
@@ -210,16 +227,23 @@ async def login(
             data={"sub": username}, expires_delta=access_token_expires
         )
         
-        # Generate refresh token
-        refresh_token, db_refresh_token = auth.create_refresh_token(db, admin_user.id, request)
+        # Generate refresh token - handle errors gracefully
+        try:
+            refresh_token, db_refresh_token = auth.create_refresh_token(db, admin_user.id, request)
+        except Exception as e:
+            logger.error(f"Error creating refresh token: {str(e)}")
+            refresh_token = None
         
         # Log the event
-        auth.log_security_event(
-            "login_success_hardcoded", 
-            user_id=admin_user.id,
-            token_id=db_refresh_token.id,
-            ip_address=request.client.host if request.client else None
-        )
+        try:
+            auth.log_security_event(
+                "login_success_hardcoded", 
+                user_id=admin_user.id,
+                token_id=getattr(db_refresh_token, 'id', 0) if 'db_refresh_token' in locals() else 0,
+                ip_address=request.client.host if request.client else None
+            )
+        except Exception as e:
+            logger.warning(f"Could not log security event: {str(e)}")
         
         return {
             "access_token": access_token,
@@ -233,11 +257,14 @@ async def login(
         logger.warning(f"Login failed for username: {username}")
         
         # Log the failed attempt
-        auth.log_security_event(
-            "login_failed", 
-            ip_address=request.client.host if request.client else None,
-            details={"username": username}
-        )
+        try:
+            auth.log_security_event(
+                "login_failed", 
+                ip_address=request.client.host if request.client else None,
+                details={"username": username}
+            )
+        except Exception as e:
+            logger.warning(f"Could not log security event: {str(e)}")
         
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -251,16 +278,23 @@ async def login(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     
-    # Generate refresh token
-    refresh_token, db_refresh_token = auth.create_refresh_token(db, user.id, request)
+    # Generate refresh token - handle errors gracefully
+    try:
+        refresh_token, db_refresh_token = auth.create_refresh_token(db, user.id, request)
+    except Exception as e:
+        logger.error(f"Error creating refresh token: {str(e)}")
+        refresh_token = None
     
     # Log the successful login
-    auth.log_security_event(
-        "login_success", 
-        user_id=user.id,
-        token_id=db_refresh_token.id,
-        ip_address=request.client.host if request.client else None
-    )
+    try:
+        auth.log_security_event(
+            "login_success", 
+            user_id=user.id,
+            token_id=getattr(db_refresh_token, 'id', 0) if 'db_refresh_token' in locals() else 0,
+            ip_address=request.client.host if request.client else None
+        )
+    except Exception as e:
+        logger.warning(f"Could not log security event: {str(e)}")
     
     logger.info(f"Login successful for username: {username}")
     

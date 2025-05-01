@@ -81,9 +81,15 @@ def authenticate_admin(username: str, password: str):
 
 def is_valid_token_format(token: str) -> bool:
     """Check if the token has a valid format (UUID v4 in this case)."""
-    uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-    import re
-    return bool(re.match(uuid_pattern, token, re.I))
+    if not token:
+        return False
+    
+    try:
+        uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        import re
+        return bool(re.match(uuid_pattern, token, re.I))
+    except:
+        return False
 
 def generate_refresh_token() -> str:
     """Generate a secure random refresh token."""
@@ -105,16 +111,116 @@ def hash_refresh_token(refresh_token: str) -> str:
 
 def log_security_event(event_type, user_id=None, token_id=None, ip_address=None, success=True, details=None):
     """Log security events in a structured format."""
-    event = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "event_type": event_type,
-        "user_id": user_id,
-        "token_id": token_id,
-        "ip_address": ip_address,
-        "success": success,
-        "details": details or {}
-    }
-    logger.info(f"SECURITY_EVENT: {event}")
+    try:
+        event = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "event_type": event_type,
+            "user_id": user_id,
+            "token_id": token_id,
+            "ip_address": ip_address,
+            "success": success,
+            "details": details or {}
+        }
+        logger.info(f"SECURITY_EVENT: {event}")
+    except Exception as e:
+        logger.error(f"Error logging security event: {str(e)}")
+
+def create_refresh_token(db: Session, user_id: int, request: Optional[Request] = None) -> Tuple[str, models.RefreshToken]:
+    """Create a new refresh token and store its hash in the database."""
+    try:
+        # Generate a random token
+        refresh_token = generate_refresh_token()
+        
+        # Hash the token for storage
+        token_hash = hash_refresh_token(refresh_token)
+        
+        # Add jitter to expiration time (±5% randomness)
+        base_days = REFRESH_TOKEN_EXPIRE_DAYS
+        jitter = random.uniform(-0.05, 0.05) * base_days
+        expires_at = datetime.utcnow() + timedelta(days=base_days + jitter)
+        
+        # Extract device info and IP from request
+        device_info = None
+        ip_address = None
+        if request:
+            user_agent = request.headers.get("user-agent", "")
+            device_info = user_agent[:200] if user_agent else None  # Limit to 200 chars
+            ip_address = request.client.host if request.client else None
+        
+        # Check if the table has the required columns
+        try:
+            # First, check if the table exists and has the necessary columns
+            sample_token = db.query(models.RefreshToken).first()
+            
+            # Create a dictionary of values to insert
+            token_data = {
+                "user_id": user_id,
+                "expires_at": expires_at,
+                "revoked": False
+            }
+            
+            # Add optional fields if they exist in the table
+            if sample_token:
+                if hasattr(sample_token, 'token_hash'):
+                    token_data["token_hash"] = token_hash
+                if hasattr(sample_token, 'device_info') and device_info:
+                    token_data["device_info"] = device_info
+                if hasattr(sample_token, 'ip_address') and ip_address:
+                    token_data["ip_address"] = ip_address
+            else:
+                # If no tokens exist yet, try with all fields
+                token_data["token_hash"] = token_hash
+                if device_info:
+                    token_data["device_info"] = device_info
+                if ip_address:
+                    token_data["ip_address"] = ip_address
+            
+            # Create the token with only the fields that exist in the table
+            db_refresh_token = models.RefreshToken(**token_data)
+            
+            db.add(db_refresh_token)
+            db.commit()
+            db.refresh(db_refresh_token)
+            
+            # Log the security event
+            log_security_event(
+                "token_created", 
+                user_id=user_id, 
+                token_id=db_refresh_token.id, 
+                ip_address=ip_address
+            )
+            
+            return refresh_token, db_refresh_token
+            
+        except SQLAlchemyError as e:
+            # If there's an error with the columns, try a minimal version
+            db.rollback()
+            logger.warning(f"Error creating token with full fields: {str(e)}. Trying minimal fields.")
+            
+            # Create with minimal fields
+            db_refresh_token = models.RefreshToken(
+                user_id=user_id,
+                expires_at=expires_at,
+                revoked=False
+            )
+            
+            db.add(db_refresh_token)
+            db.commit()
+            db.refresh(db_refresh_token)
+            
+            # Log the security event
+            log_security_event(
+                "token_created_minimal", 
+                user_id=user_id, 
+                token_id=db_refresh_token.id
+            )
+            
+            return refresh_token, db_refresh_token
+            
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Database error creating refresh token: {str(e)}", exc_info=True)
+        raise
 
 def verify_refresh_token(db: Session, refresh_token: str) -> Optional[models.RefreshToken]:
     """Verify a refresh token and return the token object if valid."""
@@ -139,11 +245,11 @@ def verify_refresh_token(db: Session, refresh_token: str) -> Optional[models.Ref
             
             # Use constant-time comparison to find the matching token
             for token in potential_tokens:
-                if secrets.compare_digest(token.token_hash, token_hash):
+                if token.token_hash and secrets.compare_digest(token.token_hash, token_hash):
                     return token
         else:
             # If token_hash doesn't exist, log a warning
-            logger.warning("MIGRATION NEEDED: The refresh_tokens table is missing the token_hash column. Please run the migration.")
+            logger.warning("MIGRATION NEEDED: The refresh_tokens table is missing the token_hash column")
             # Return the first non-revoked token as a fallback (not secure, but keeps the app running)
             return db.query(models.RefreshToken).filter(
                 models.RefreshToken.user_id > 0,  # Any user
@@ -155,77 +261,6 @@ def verify_refresh_token(db: Session, refresh_token: str) -> Optional[models.Ref
     except Exception as e:
         logger.error(f"Error verifying refresh token: {str(e)}", exc_info=True)
         return None
-
-def create_refresh_token(db: Session, user_id: int, request: Optional[Request] = None) -> Tuple[str, models.RefreshToken]:
-    """Create a new refresh token and store its hash in the database."""
-    try:
-        # Generate a random token
-        refresh_token = generate_refresh_token()
-        
-        # Hash the token for storage
-        token_hash = hash_refresh_token(refresh_token)
-        
-        # Add jitter to expiration time (±5% randomness)
-        base_days = REFRESH_TOKEN_EXPIRE_DAYS
-        jitter = random.uniform(-0.05, 0.05) * base_days
-        expires_at = datetime.utcnow() + timedelta(days=base_days + jitter)
-        
-        # Extract device info and IP from request
-        device_info = None
-        ip_address = None
-        if request:
-            user_agent = request.headers.get("user-agent", "")
-            device_info = user_agent[:200] if user_agent else None  # Limit to 200 chars
-            ip_address = request.client.host if request.client else None
-        
-        # Check if token_hash column exists by trying to create a token
-        try:
-            # Store in database
-            db_refresh_token = models.RefreshToken(
-                token_hash=token_hash,
-                user_id=user_id,
-                expires_at=expires_at,
-                device_info=device_info,
-                ip_address=ip_address
-            )
-            
-            db.add(db_refresh_token)
-            db.commit()
-            db.refresh(db_refresh_token)
-            
-        except Exception as column_error:
-            # If token_hash column doesn't exist, create a token without it
-            if "no column named token_hash" in str(column_error):
-                logger.warning("MIGRATION NEEDED: The refresh_tokens table is missing the token_hash column")
-                
-                # Create token without token_hash
-                db_refresh_token = models.RefreshToken(
-                    user_id=user_id,
-                    expires_at=expires_at,
-                    device_info=device_info,
-                    ip_address=ip_address
-                )
-                
-                db.add(db_refresh_token)
-                db.commit()
-                db.refresh(db_refresh_token)
-            else:
-                # Re-raise if it's a different error
-                raise
-        
-        # Log the security event
-        log_security_event(
-            "token_created", 
-            user_id=user_id, 
-            token_id=db_refresh_token.id, 
-            ip_address=ip_address
-        )
-        
-        return refresh_token, db_refresh_token
-    except SQLAlchemyError as e:
-        db.rollback()
-        logger.error(f"Database error creating refresh token: {str(e)}", exc_info=True)
-        raise
 
 def revoke_refresh_token(db: Session, token_id: int) -> bool:
     """Revoke a specific refresh token."""
@@ -308,17 +343,42 @@ def rotate_refresh_token(db: Session, old_token_id: int, user_id: int, request: 
             device_info = user_agent[:200] if user_agent else None
             ip_address = request.client.host if request.client else None
         
-        # Create new token record
-        db_refresh_token = models.RefreshToken(
-            token_hash=token_hash,
-            user_id=user_id,
-            expires_at=expires_at,
-            device_info=device_info,
-            ip_address=ip_address
-        )
-        
-        db.add(db_refresh_token)
-        db.flush()
+        # Check if the table has the required columns
+        try:
+            # Create token data with all fields
+            token_data = {
+                "user_id": user_id,
+                "expires_at": expires_at,
+                "revoked": False
+            }
+            
+            # Add optional fields if they exist in the table
+            if hasattr(old_token, 'token_hash'):
+                token_data["token_hash"] = token_hash
+            if hasattr(old_token, 'device_info') and device_info:
+                token_data["device_info"] = device_info
+            if hasattr(old_token, 'ip_address') and ip_address:
+                token_data["ip_address"] = ip_address
+            
+            # Create the token with only the fields that exist in the table
+            db_refresh_token = models.RefreshToken(**token_data)
+            
+            db.add(db_refresh_token)
+            db.flush()
+            
+        except SQLAlchemyError as e:
+            # If there's an error with the columns, try a minimal version
+            logger.warning(f"Error creating token with full fields: {str(e)}. Trying minimal fields.")
+            
+            # Create with minimal fields
+            db_refresh_token = models.RefreshToken(
+                user_id=user_id,
+                expires_at=expires_at,
+                revoked=False
+            )
+            
+            db.add(db_refresh_token)
+            db.flush()
         
         # Commit the transaction
         transaction.commit()
@@ -358,44 +418,3 @@ def clean_expired_tokens(db: Session) -> int:
         db.rollback()
         logger.error(f"Database error cleaning expired tokens: {str(e)}", exc_info=True)
         return 0
-
-def verify_refresh_token(db: Session, refresh_token: str) -> Optional[models.RefreshToken]:
-    """Verify a refresh token and return the token object if valid."""
-    if not refresh_token or not is_valid_token_format(refresh_token):
-        logger.warning("Invalid token format or empty token")
-        return None
-    
-    try:
-        # Hash the token for comparison
-        token_hash = hash_refresh_token(refresh_token)
-        
-        # Check if token_hash column exists by querying a token
-        sample_token = db.query(models.RefreshToken).first()
-        has_token_hash = hasattr(sample_token, 'token_hash') if sample_token else False
-        
-        if has_token_hash:
-            # Get potentially valid tokens (not revoked and not expired)
-            potential_tokens = db.query(models.RefreshToken).filter(
-                models.RefreshToken.revoked == False,
-                models.RefreshToken.expires_at > datetime.utcnow()
-            ).all()
-            
-            # Use constant-time comparison to find the matching token
-            for token in potential_tokens:
-                if secrets.compare_digest(token.token_hash, token_hash):
-                    return token
-        else:
-            # If token_hash doesn't exist, log a warning
-            logger.warning("MIGRATION NEEDED: The refresh_tokens table is missing the token_hash column. Please run the migration.")
-            # Return the first non-revoked token as a fallback (not secure, but keeps the app running)
-            return db.query(models.RefreshToken).filter(
-                models.RefreshToken.user_id > 0,  # Any user
-                models.RefreshToken.revoked == False,
-                models.RefreshToken.expires_at > datetime.utcnow()
-            ).first()
-        
-        return None
-    except Exception as e:
-        logger.error(f"Error verifying refresh token: {str(e)}", exc_info=True)
-        return None
-
