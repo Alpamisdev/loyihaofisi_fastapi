@@ -168,10 +168,11 @@ class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
     
     id = Column(Integer, primary_key=True, index=True)
-    token_hash = Column(String, nullable=False, index=True)
+    token = Column(String, nullable=False)  # Store the token itself (not recommended for production)
+    token_hash = Column(String, nullable=True)  # Store the hash for secure comparison
     user_id = Column(Integer, ForeignKey("admin_users.id"), nullable=False, index=True)
-    expires_at = Column(DateTime, nullable=False, index=True)  # Add index
-    revoked = Column(Boolean, default=False, index=True)  # Add index
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime, default=func.now())
     device_info = Column(String, nullable=True)
     ip_address = Column(String, nullable=True)

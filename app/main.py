@@ -61,7 +61,6 @@ def read_root():
 def health_check():
     return {"status": "healthy"}
 
-# Authentication endpoints
 @app.post("/token", response_model=schemas.Token, tags=["authentication"])
 async def login_for_access_token(
     request: Request,
@@ -102,18 +101,19 @@ async def login_for_access_token(
         )
         
         # Generate refresh token - handle errors gracefully
+        refresh_token = None
+        db_refresh_token = None
         try:
             refresh_token, db_refresh_token = auth.create_refresh_token(db, admin_user.id, request)
         except Exception as e:
             logger.error(f"Error creating refresh token: {str(e)}")
-            refresh_token = None
         
         # Log the event
         try:
             auth.log_security_event(
                 "login_success_hardcoded", 
                 user_id=admin_user.id,
-                token_id=getattr(db_refresh_token, 'id', 0) if 'db_refresh_token' in locals() else 0,
+                token_id=getattr(db_refresh_token, 'id', 0) if db_refresh_token else 0,
                 ip_address=request.client.host if request.client else None
             )
         except Exception as e:
@@ -153,18 +153,19 @@ async def login_for_access_token(
     )
     
     # Generate refresh token - handle errors gracefully
+    refresh_token = None
+    db_refresh_token = None
     try:
         refresh_token, db_refresh_token = auth.create_refresh_token(db, user.id, request)
     except Exception as e:
         logger.error(f"Error creating refresh token: {str(e)}")
-        refresh_token = None
     
     # Log the successful login
     try:
         auth.log_security_event(
             "login_success", 
             user_id=user.id,
-            token_id=getattr(db_refresh_token, 'id', 0) if 'db_refresh_token' in locals() else 0,
+            token_id=getattr(db_refresh_token, 'id', 0) if db_refresh_token else 0,
             ip_address=request.client.host if request.client else None
         )
     except Exception as e:
@@ -228,18 +229,19 @@ async def login(
         )
         
         # Generate refresh token - handle errors gracefully
+        refresh_token = None
+        db_refresh_token = None
         try:
             refresh_token, db_refresh_token = auth.create_refresh_token(db, admin_user.id, request)
         except Exception as e:
             logger.error(f"Error creating refresh token: {str(e)}")
-            refresh_token = None
         
         # Log the event
         try:
             auth.log_security_event(
                 "login_success_hardcoded", 
                 user_id=admin_user.id,
-                token_id=getattr(db_refresh_token, 'id', 0) if 'db_refresh_token' in locals() else 0,
+                token_id=getattr(db_refresh_token, 'id', 0) if db_refresh_token else 0,
                 ip_address=request.client.host if request.client else None
             )
         except Exception as e:
@@ -279,18 +281,19 @@ async def login(
     )
     
     # Generate refresh token - handle errors gracefully
+    refresh_token = None
+    db_refresh_token = None
     try:
         refresh_token, db_refresh_token = auth.create_refresh_token(db, user.id, request)
     except Exception as e:
         logger.error(f"Error creating refresh token: {str(e)}")
-        refresh_token = None
     
     # Log the successful login
     try:
         auth.log_security_event(
             "login_success", 
             user_id=user.id,
-            token_id=getattr(db_refresh_token, 'id', 0) if 'db_refresh_token' in locals() else 0,
+            token_id=getattr(db_refresh_token, 'id', 0) if db_refresh_token else 0,
             ip_address=request.client.host if request.client else None
         )
     except Exception as e:
@@ -304,6 +307,7 @@ async def login(
         "refresh_token": refresh_token,
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
     }
+
 
 @app.get("/users/me/", response_model=schemas.AdminUser, tags=["users"])
 async def read_users_me(current_user: models.AdminUser = Depends(auth.get_current_user)):
