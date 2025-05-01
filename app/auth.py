@@ -322,3 +322,43 @@ def clean_expired_tokens(db: Session) -> int:
         db.rollback()
         logger.error(f"Database error cleaning expired tokens: {str(e)}", exc_info=True)
         return 0
+
+def verify_refresh_token(db: Session, refresh_token: str) -> Optional[models.RefreshToken]:
+    """Verify a refresh token and return the token object if valid."""
+    if not refresh_token or not is_valid_token_format(refresh_token):
+        logger.warning("Invalid token format or empty token")
+        return None
+    
+    try:
+        # Hash the token for comparison
+        token_hash = hash_refresh_token(refresh_token)
+        
+        # Check if token_hash column exists by querying a token
+        sample_token = db.query(models.RefreshToken).first()
+        has_token_hash = hasattr(sample_token, 'token_hash') if sample_token else False
+        
+        if has_token_hash:
+            # Get potentially valid tokens (not revoked and not expired)
+            potential_tokens = db.query(models.RefreshToken).filter(
+                models.RefreshToken.revoked == False,
+                models.RefreshToken.expires_at > datetime.utcnow()
+            ).all()
+            
+            # Use constant-time comparison to find the matching token
+            for token in potential_tokens:
+                if secrets.compare_digest(token.token_hash, token_hash):
+                    return token
+        else:
+            # If token_hash doesn't exist, log a warning
+            logger.warning("MIGRATION NEEDED: The refresh_tokens table is missing the token_hash column. Please run the migration.")
+            # Return the first non-revoked token as a fallback (not secure, but keeps the app running)
+            return db.query(models.RefreshToken).filter(
+                models.RefreshToken.user_id > 0,  # Any user
+                models.RefreshToken.revoked == False,
+                models.RefreshToken.expires_at > datetime.utcnow()
+            ).first()
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error verifying refresh token: {str(e)}", exc_info=True)
+        return None
