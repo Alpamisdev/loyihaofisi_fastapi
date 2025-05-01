@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Body, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Body, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,16 +26,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# # Configure CORS
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],  # Allow all origins for development, restrict in production
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-#     expose_headers=["Content-Disposition", "Content-Length", "Content-Type"],
-# )
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000","http://localhost:3001","https://loyiha-qq.netlify.app/","https://loyihaofisi.uz","https://loyiha-qq.netlify.app"],  # List specific origins
@@ -45,6 +35,7 @@ app.add_middleware(
     expose_headers=["Content-Disposition", "Content-Length", "Content-Type"],
     max_age=600,
 )
+
 
 # Include routers
 app.include_router(menu.router)
@@ -74,6 +65,7 @@ def health_check():
 @app.post("/token", response_model=schemas.Token, tags=["authentication"])
 async def login_for_access_token(
     request: Request,
+    background_tasks: BackgroundTasks,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
@@ -86,21 +78,58 @@ async def login_for_access_token(
     # If database authentication fails, try hardcoded admin credentials
     if not user and form_data.username == "admin" and form_data.password == "admin123":
         logger.info("Using hardcoded admin credentials")
-        # Create access token with hardcoded credentials
+        
+        # Look up or create admin user in database for refresh token
+        admin_user = db.query(models.AdminUser).filter(models.AdminUser.username == "admin").first()
+        
+        if not admin_user:
+            # Create admin user if it doesn't exist
+            hashed_password = auth.get_password_hash("admin123")
+            admin_user = models.AdminUser(
+                username="admin",
+                password_hash=hashed_password,
+                role="admin"
+            )
+            db.add(admin_user)
+            db.commit()
+            db.refresh(admin_user)
+            logger.info("Created admin user for refresh token")
+        
+        # Create access token
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = auth.create_access_token(
             data={"sub": form_data.username}, expires_delta=access_token_expires
         )
-        # Return token without refresh token for hardcoded admin
+        
+        # Generate refresh token
+        refresh_token, db_refresh_token = auth.create_refresh_token(db, admin_user.id, request)
+        
+        # Log the event
+        auth.log_security_event(
+            "login_success_hardcoded", 
+            user_id=admin_user.id,
+            token_id=db_refresh_token.id,
+            ip_address=request.client.host if request.client else None
+        )
+        
         return {
             "access_token": access_token,
             "token_type": "bearer",
+            "refresh_token": refresh_token,
             "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
         }
     
     # If all authentication methods fail, raise an error
     if not user:
         logger.warning(f"Authentication failed for username: {form_data.username}")
+        
+        # Log the failed attempt
+        auth.log_security_event(
+            "login_failed", 
+            ip_address=request.client.host if request.client else None,
+            details={"username": form_data.username}
+        )
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -114,7 +143,15 @@ async def login_for_access_token(
     )
     
     # Generate refresh token
-    refresh_token, _ = auth.create_refresh_token(db, user.id, request)
+    refresh_token, db_refresh_token = auth.create_refresh_token(db, user.id, request)
+    
+    # Log the successful login
+    auth.log_security_event(
+        "login_success", 
+        user_id=user.id,
+        token_id=db_refresh_token.id,
+        ip_address=request.client.host if request.client else None
+    )
     
     logger.info(f"Authentication successful for username: {form_data.username}")
     
@@ -125,15 +162,23 @@ async def login_for_access_token(
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
     }
 
-# Login endpoint with hardcoded credentials
+# Login endpoint with JSON body
 @app.post("/login", response_model=schemas.Token, tags=["authentication"])
 async def login(
     request: Request,
+    background_tasks: BackgroundTasks,
     username: str = Body(...),
     password: str = Body(...)
 ):
     # Log authentication attempt
     logger.info(f"Login attempt for username: {username}")
+    
+    # Log request details in the background
+    async def log_request_details():
+        client_ip = request.client.host if request.client else "unknown"
+        logger.debug(f"Login request from IP: {client_ip}, User-Agent: {request.headers.get('user-agent', 'unknown')}")
+    
+    background_tasks.add_task(log_request_details)
     
     # Try to authenticate with database
     db = next(get_db())
@@ -142,20 +187,58 @@ async def login(
     # If database authentication fails, try hardcoded credentials
     if not user and auth.authenticate_admin(username, password):
         logger.info(f"Login successful for username: {username} (hardcoded)")
+        
+        # Look up or create admin user in database for refresh token
+        admin_user = db.query(models.AdminUser).filter(models.AdminUser.username == "admin").first()
+        
+        if not admin_user:
+            # Create admin user if it doesn't exist
+            hashed_password = auth.get_password_hash("admin123")
+            admin_user = models.AdminUser(
+                username="admin",
+                password_hash=hashed_password,
+                role="admin"
+            )
+            db.add(admin_user)
+            db.commit()
+            db.refresh(admin_user)
+            logger.info("Created admin user for refresh token")
+        
+        # Create access token
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = auth.create_access_token(
             data={"sub": username}, expires_delta=access_token_expires
         )
-        # Return token without refresh token for hardcoded admin
+        
+        # Generate refresh token
+        refresh_token, db_refresh_token = auth.create_refresh_token(db, admin_user.id, request)
+        
+        # Log the event
+        auth.log_security_event(
+            "login_success_hardcoded", 
+            user_id=admin_user.id,
+            token_id=db_refresh_token.id,
+            ip_address=request.client.host if request.client else None
+        )
+        
         return {
             "access_token": access_token,
             "token_type": "bearer",
+            "refresh_token": refresh_token,
             "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
         }
     
     # If all authentication methods fail, raise an error
     if not user:
         logger.warning(f"Login failed for username: {username}")
+        
+        # Log the failed attempt
+        auth.log_security_event(
+            "login_failed", 
+            ip_address=request.client.host if request.client else None,
+            details={"username": username}
+        )
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -169,7 +252,15 @@ async def login(
     )
     
     # Generate refresh token
-    refresh_token, _ = auth.create_refresh_token(db, user.id, request)
+    refresh_token, db_refresh_token = auth.create_refresh_token(db, user.id, request)
+    
+    # Log the successful login
+    auth.log_security_event(
+        "login_success", 
+        user_id=user.id,
+        token_id=db_refresh_token.id,
+        ip_address=request.client.host if request.client else None
+    )
     
     logger.info(f"Login successful for username: {username}")
     

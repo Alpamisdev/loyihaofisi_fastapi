@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -163,20 +163,25 @@ class AdminUser(Base):
     # Add relationship to refresh tokens
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
 
-# Refresh Tokens
+# Refresh Tokens with improved indexes
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
     
     id = Column(Integer, primary_key=True, index=True)
     token_hash = Column(String, nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("admin_users.id"), nullable=False)
-    expires_at = Column(DateTime, nullable=False)
-    revoked = Column(Boolean, default=False)
+    user_id = Column(Integer, ForeignKey("admin_users.id"), nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)  # Add index
+    revoked = Column(Boolean, default=False, index=True)  # Add index
     created_at = Column(DateTime, default=func.now())
-    device_info = Column(String, nullable=True)  # Store user agent or device identifier
-    ip_address = Column(String, nullable=True)   # Store IP address for security
+    device_info = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
     
     user = relationship("AdminUser", back_populates="refresh_tokens")
+    
+    # Add composite index for common query pattern
+    __table_args__ = (
+        Index('idx_token_active', 'revoked', 'expires_at'),
+    )
 
 # Uploaded Files
 class UploadedFile(Base):
