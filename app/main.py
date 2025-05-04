@@ -7,10 +7,11 @@ from sqlalchemy.orm import Session
 import os
 import logging
 from datetime import timedelta
+from enum import Enum
 
 from . import models, schemas, auth
 from .database import engine, get_db
-from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads, token
+from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads, token, news
 from .config import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 
 # Configure logging
@@ -26,6 +27,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000","http://localhost:3001","https://loyiha-qq.netlify.app/","https://loyihaofisi.uz","https://loyiha-qq.netlify.app"],  # List specific origins
@@ -50,6 +52,14 @@ app.include_router(year_name.router)
 app.include_router(menu_links.router)
 app.include_router(uploads.router)
 app.include_router(token.router)  # Add the token router for refresh token operations
+app.include_router(news.router)   # Add the news router for multilingual blog
+
+# Define supported languages
+class SupportedLanguages(str, Enum):
+    ENGLISH = "en"
+    RUSSIAN = "ru"
+    UZBEK = "uz"
+    KARAKALPAK = "kk"
 
 # Root endpoint
 @app.get("/", tags=["root"])
@@ -61,6 +71,19 @@ def read_root():
 def health_check():
     return {"status": "healthy"}
 
+# Get supported languages
+@app.get("/languages", tags=["languages"])
+def get_supported_languages():
+    return {
+        "languages": [
+            {"code": "en", "name": "English"},
+            {"code": "ru", "name": "Russian"},
+            {"code": "uz", "name": "Uzbek"},
+            {"code": "kk", "name": "Karakalpak"}
+        ]
+    }
+
+# Authentication endpoints
 @app.post("/token", response_model=schemas.Token, tags=["authentication"])
 async def login_for_access_token(
     request: Request,
@@ -307,7 +330,6 @@ async def login(
         "refresh_token": refresh_token,
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
     }
-
 
 @app.get("/users/me/", response_model=schemas.AdminUser, tags=["users"])
 async def read_users_me(current_user: models.AdminUser = Depends(auth.get_current_user)):

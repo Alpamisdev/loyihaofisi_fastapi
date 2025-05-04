@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Union
 from datetime import datetime
+from enum import Enum
 
 # Import EmailStr conditionally to avoid errors if email-validator is not installed
 try:
@@ -10,6 +11,13 @@ except ImportError:
     from pydantic import StringConstraints
     # Create a fallback type that's just a string with validation
     EmailStr = Annotated[str, StringConstraints(pattern=r"[^@]+@[^@]+\.[^@]+")]
+
+# Language Enum for multilingual support
+class LanguageEnum(str, Enum):
+    EN = "en"
+    RU = "ru"
+    UZ = "uz"
+    KK = "kk"  # Karakalpak
 
 # Base schemas
 class MenuBase(BaseModel):
@@ -42,6 +50,7 @@ class StaffBase(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     photo: Optional[str] = None
+    address: Optional[str] = None  # New field for staff address
 
 class BlogCategoryBase(BaseModel):
     name: str
@@ -106,6 +115,8 @@ class UploadedFile(UploadedFileBase):
     
     class Config:
         from_attributes = True
+        # Make the model more permissive
+        extra = "ignore"
 
 # Response schemas (including id and other auto-generated fields)
 class Menu(MenuBase):
@@ -239,3 +250,83 @@ class TokenRefreshRequest(BaseModel):
 
 class TokenRevokeRequest(BaseModel):
     refresh_token: str
+
+# Multilingual News Schemas
+class NewsCategoryBase(BaseModel):
+    slug: str
+    language: str
+    name: str
+    description: Optional[str] = None
+
+class NewsCategoryCreate(NewsCategoryBase):
+    pass
+
+class NewsCategory(NewsCategoryBase):
+    id: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class NewsTagBase(BaseModel):
+    slug: str
+    language: str
+    name: str
+
+class NewsTagCreate(NewsTagBase):
+    pass
+
+class NewsTag(NewsTagBase):
+    id: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class NewsBase(BaseModel):
+    slug: str
+    language: str
+    title: str
+    content: Optional[str] = None
+    summary: Optional[str] = None
+    image_url: Optional[str] = None
+    published: bool = False
+    publication_date: Optional[datetime] = None
+    category_id: Optional[int] = None
+
+class NewsCreate(NewsBase):
+    tag_ids: Optional[List[int]] = None
+
+class NewsUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    summary: Optional[str] = None
+    image_url: Optional[str] = None
+    published: Optional[bool] = None
+    publication_date: Optional[datetime] = None
+    category_id: Optional[int] = None
+    tag_ids: Optional[List[int]] = None
+
+class News(NewsBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    author_id: Optional[int] = None
+    views: int
+    tags: List["NewsTag"] = []
+    
+    class Config:
+        from_attributes = True
+
+class NewsWithCategory(News):
+    category: Optional["NewsCategory"] = None
+    author: Optional["AdminUser"] = None
+    
+    class Config:
+        from_attributes = True
+
+class NewsTranslation(BaseModel):
+    language: str
+    title: str
+    content: Optional[str] = None
+    summary: Optional[str] = None
