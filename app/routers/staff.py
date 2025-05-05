@@ -16,7 +16,13 @@ def create_staff_member(
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
-    db_staff = models.Staff(**staff.dict())
+    # Convert empty strings to None for nullable fields
+    staff_data = staff.dict()
+    for field in ['position', 'email', 'phone', 'photo', 'address']:
+        if field in staff_data and staff_data[field] == '':
+            staff_data[field] = None
+    
+    db_staff = models.Staff(**staff_data)
     db.add(db_staff)
     db.commit()
     db.refresh(db_staff)
@@ -46,7 +52,13 @@ def update_staff_member(
     if db_staff is None:
         raise HTTPException(status_code=404, detail="Staff member not found")
     
-    for key, value in staff.dict().items():
+    # Convert empty strings to None for nullable fields
+    staff_data = staff.dict()
+    for field in ['position', 'email', 'phone', 'photo', 'address']:
+        if field in staff_data and staff_data[field] == '':
+            staff_data[field] = None
+    
+    for key, value in staff_data.items():
         setattr(db_staff, key, value)
     
     db.commit()

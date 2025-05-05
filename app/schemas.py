@@ -50,7 +50,7 @@ class StaffBase(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     photo: Optional[str] = None
-    address: Optional[str] = None  # New field for staff address
+    address: Optional[str] = None  # Ensure this is Optional
 
 class BlogCategoryBase(BaseModel):
     name: str

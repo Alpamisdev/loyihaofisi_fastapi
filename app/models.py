@@ -59,7 +59,7 @@ class Staff(Base):
     email = Column(String)
     phone = Column(String)
     photo = Column(String)
-    address = Column(String)  # New column for staff address
+    address = Column(String, nullable=True)  # Explicitly set nullable=True
 
 # Blog
 class BlogCategory(Base):

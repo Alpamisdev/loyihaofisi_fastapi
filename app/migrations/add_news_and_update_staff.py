@@ -7,8 +7,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("db_migration")
 
-def run_migration():
-    """Update database schema to add news table and address column to staff."""
+def update_staff_address_nullable():
+    """Update staff table to make address column nullable and set NULL for existing records."""
     try:
         # Get the database file path
         db_path = "website.db"
@@ -22,139 +22,35 @@ def run_migration():
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # 1. Add address column to staff table
-        logger.info("Adding 'address' column to staff table...")
-        try:
-            cursor.execute("PRAGMA table_info(staff)")
-            columns = cursor.fetchall()
-            column_names = [col[1] for col in columns]
-            
-            if "address" not in column_names:
-                cursor.execute("ALTER TABLE staff ADD COLUMN address VARCHAR")
-                logger.info("Added 'address' column to staff table")
-            else:
-                logger.info("'address' column already exists in staff table")
-        except Exception as e:
-            logger.error(f"Error adding address column: {str(e)}")
-            conn.rollback()
-            return False
+        # Check if the address column exists
+        cursor.execute("PRAGMA table_info(staff)")
+        columns = cursor.fetchall()
+        column_names = [col[1] for col in columns]
         
-        # 2. Create news table with multilingual support
-        logger.info("Creating news table...")
-        try:
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS news (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                slug VARCHAR NOT NULL,
-                language VARCHAR NOT NULL,
-                title VARCHAR NOT NULL,
-                content TEXT,
-                summary TEXT,
-                image_url VARCHAR,
-                published BOOLEAN DEFAULT 0,
-                publication_date TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                author_id INTEGER,
-                category_id INTEGER,
-                views INTEGER DEFAULT 0,
-                FOREIGN KEY(author_id) REFERENCES admin_users(id),
-                FOREIGN KEY(category_id) REFERENCES news_categories(id),
-                UNIQUE(slug, language)
-            )
-            """)
-            
-            # Create indexes
-            cursor.execute("CREATE INDEX IF NOT EXISTS ix_news_slug ON news (slug)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS ix_news_language ON news (language)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS ix_news_published ON news (published)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS ix_news_publication_date ON news (publication_date)")
-            
-            logger.info("Created news table with indexes")
-        except Exception as e:
-            logger.error(f"Error creating news table: {str(e)}")
-            conn.rollback()
-            return False
+        if "address" not in column_names:
+            logger.info("Adding 'address' column to staff table as nullable")
+            cursor.execute("ALTER TABLE staff ADD COLUMN address VARCHAR")
+            logger.info("Added 'address' column to staff table")
+        else:
+            logger.info("'address' column already exists in staff table")
         
-        # 3. Create news categories table
-        logger.info("Creating news categories table...")
-        try:
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS news_categories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                slug VARCHAR NOT NULL,
-                language VARCHAR NOT NULL,
-                name VARCHAR NOT NULL,
-                description TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(slug, language)
-            )
-            """)
-            
-            # Create indexes
-            cursor.execute("CREATE INDEX IF NOT EXISTS ix_news_categories_slug ON news_categories (slug)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS ix_news_categories_language ON news_categories (language)")
-            
-            logger.info("Created news categories table with indexes")
-        except Exception as e:
-            logger.error(f"Error creating news categories table: {str(e)}")
-            conn.rollback()
-            return False
-        
-        # 4. Create news tags table
-        logger.info("Creating news tags table...")
-        try:
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS news_tags (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                slug VARCHAR NOT NULL,
-                language VARCHAR NOT NULL,
-                name VARCHAR NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(slug, language)
-            )
-            """)
-            
-            # Create indexes
-            cursor.execute("CREATE INDEX IF NOT EXISTS ix_news_tags_slug ON news_tags (slug)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS ix_news_tags_language ON news_tags (language)")
-            
-            logger.info("Created news tags table with indexes")
-        except Exception as e:
-            logger.error(f"Error creating news tags table: {str(e)}")
-            conn.rollback()
-            return False
-        
-        # 5. Create news_tags_association table (many-to-many relationship)
-        logger.info("Creating news_tags_association table...")
-        try:
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS news_tags_association (
-                news_id INTEGER,
-                tag_id INTEGER,
-                PRIMARY KEY (news_id, tag_id),
-                FOREIGN KEY(news_id) REFERENCES news(id) ON DELETE CASCADE,
-                FOREIGN KEY(tag_id) REFERENCES news_tags(id) ON DELETE CASCADE
-            )
-            """)
-            
-            logger.info("Created news_tags_association table")
-        except Exception as e:
-            logger.error(f"Error creating news_tags_association table: {str(e)}")
-            conn.rollback()
-            return False
+        # Update any NULL values to ensure they're properly handled
+        # SQLite doesn't support modifying column constraints directly,
+        # but we can ensure all existing records have proper NULL values
+        cursor.execute("UPDATE staff SET address = NULL WHERE address = '' OR address IS NULL")
+        logger.info(f"Updated {cursor.rowcount} staff records to have NULL address")
         
         # Commit changes and close connection
         conn.commit()
         conn.close()
         
-        logger.info("Migration completed successfully")
+        logger.info("Successfully updated staff table")
         return True
     
     except Exception as e:
-        logger.error(f"Migration failed: {str(e)}")
+        logger.error(f"Error updating staff table: {str(e)}")
         return False
 
 if __name__ == "__main__":
-    success = run_migration()
+    success = update_staff_address_nullable()
     print(f"Migration {'successful' if success else 'failed'}")
