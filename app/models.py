@@ -45,6 +45,7 @@ class Feedback(Base):
     phone_number = Column(String)
     email = Column(String)
     text = Column(Text)
+    theme = Column(String)  # Add theme column
     created_at = Column(DateTime, default=func.now())
     
     about_company_items = relationship("AboutCompanyCategoryItem", back_populates="feedback")

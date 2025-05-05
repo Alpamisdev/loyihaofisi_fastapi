@@ -43,6 +43,7 @@ class FeedbackBase(BaseModel):
     phone_number: Optional[str] = None
     email: Optional[str] = None
     text: Optional[str] = None
+    theme: Optional[str] = None
 
 class StaffBase(BaseModel):
     position: Optional[str] = None

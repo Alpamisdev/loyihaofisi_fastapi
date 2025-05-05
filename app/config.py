@@ -22,3 +22,8 @@ ALLOWED_IMAGE_TYPES = [
     "image/bmp", 
     "image/tiff"
 ]
+
+# Telegram Notification Settings
+TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "True").lower() in ("true", "1", "t")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "5952272127:AAGlLNuPiC6Wgi263VelVU6jtlokoh2lgSg")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1002283248375")
