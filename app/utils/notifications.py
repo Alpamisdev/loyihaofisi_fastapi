@@ -26,6 +26,10 @@ def format_feedback_for_email(feedback: Dict[str, Any]) -> str:
     """Format feedback data for email notification with detailed information."""
     created_at = feedback.get('created_at', datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
     
+    # Replace newlines with <br> for HTML
+    message_text = feedback.get('text', 'No message')
+    message_html = message_text.replace('\n', '<br>')
+    
     html = f"""
     <html>
     <head>
@@ -62,7 +66,7 @@ def format_feedback_for_email(feedback: Dict[str, Any]) -> str:
             
             <div class="feedback-item">
                 <span class="label">Message:</span>
-                <p>{feedback.get('text', 'No message').replace('\n', '<br>')}</p>
+                <p>{message_html}</p>
             </div>
             
             <div class="feedback-item">
