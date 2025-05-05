@@ -8,6 +8,10 @@ import os
 import logging
 from datetime import timedelta
 from enum import Enum
+from dotenv import load_dotenv
+
+# Load environment variables at the start
+load_dotenv()
 
 from . import models, schemas, auth
 from .database import engine, get_db

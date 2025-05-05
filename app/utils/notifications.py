@@ -2,10 +2,20 @@ import logging
 import httpx
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
+import os
+from dotenv import load_dotenv
 from ..config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Log Telegram configuration at module load time
+logger.info(f"Module load - TELEGRAM_ENABLED: {TELEGRAM_ENABLED}")
+logger.info(f"Module load - TELEGRAM_BOT_TOKEN: {'Set' if TELEGRAM_BOT_TOKEN else 'Not set'}")
+logger.info(f"Module load - TELEGRAM_CHAT_ID: {'Set' if TELEGRAM_CHAT_ID else 'Not set'}")
 
 def format_feedback_for_telegram(feedback: Dict[str, Any]) -> str:
     """Format feedback data for Telegram notification with concise information."""

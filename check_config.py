@@ -1,38 +1,40 @@
 #!/usr/bin/env python3
-import inspect
+import os
 import logging
-from app.config import *
+from dotenv import load_dotenv
+from app.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("check_config")
 
 def check_config():
-    """Check what variables are available in the config module."""
-    # Get all variables from the config module
-    config_vars = {name: value for name, value in globals().items() 
-                  if not name.startswith('_') and not inspect.ismodule(value)}
+    """Check if config variables are loaded correctly."""
+    # Load .env file
+    load_dotenv()
     
-    logger.info("Available config variables:")
-    for name, value in config_vars.items():
-        # Mask sensitive values
-        if "TOKEN" in name or "KEY" in name or "PASSWORD" in name or "SECRET" in name:
-            value_str = f"{str(value)[:5]}..." if value else "Not set"
-        else:
-            value_str = str(value)
-        
-        logger.info(f"  {name}: {value_str}")
+    # Check Telegram configuration
+    logger.info(f"TELEGRAM_ENABLED: {TELEGRAM_ENABLED}")
+    logger.info(f"TELEGRAM_BOT_TOKEN: {'Set' if TELEGRAM_BOT_TOKEN else 'Not set'}")
+    if TELEGRAM_BOT_TOKEN:
+        # Show first few characters for verification
+        logger.info(f"  Token starts with: {TELEGRAM_BOT_TOKEN[:5]}...")
     
-    # Check specifically for Telegram variables
-    telegram_vars = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_ENABLED"]
-    missing = [var for var in telegram_vars if var not in config_vars]
+    logger.info(f"TELEGRAM_CHAT_ID: {'Set' if TELEGRAM_CHAT_ID else 'Not set'}")
+    if TELEGRAM_CHAT_ID:
+        logger.info(f"  Chat ID: {TELEGRAM_CHAT_ID}")
     
-    if missing:
-        logger.warning(f"Missing Telegram config variables: {', '.join(missing)}")
+    # Check if critical environment variables are set
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("Missing critical Telegram configuration!")
         return False
     
-    logger.info("All required Telegram config variables are available")
+    logger.info("Config variables loaded successfully")
     return True
 
 if __name__ == "__main__":
-    check_config()
+    success = check_config()
+    if success:
+        logger.info("Config check passed")
+    else:
+        logger.error("Config check failed")

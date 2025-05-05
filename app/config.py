@@ -1,5 +1,9 @@
 import os
 from typing import Optional
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Base URL for file access - defaults to None which will use the request's base URL
 BASE_URL = os.getenv("BASE_URL", "https://api.alpamis.space")
@@ -27,3 +31,8 @@ ALLOWED_IMAGE_TYPES = [
 TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "True").lower() in ("true", "1", "t")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# Print Telegram settings for debugging
+print(f"TELEGRAM_ENABLED: {TELEGRAM_ENABLED}")
+print(f"TELEGRAM_BOT_TOKEN: {'Set' if TELEGRAM_BOT_TOKEN else 'Not set'}")
+print(f"TELEGRAM_CHAT_ID: {'Set' if TELEGRAM_CHAT_ID else 'Not set'}")
