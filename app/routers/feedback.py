@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from .. import models, schemas, auth
 from ..database import get_db
-from ..utils.telegram_notifier import send_telegram_notification
+from ..utils.notifications import send_feedback_notifications
 import logging
 
 # Configure logging
@@ -38,8 +38,8 @@ async def create_feedback(
         "created_at": db_feedback.created_at
     }
     
-    # Send Telegram notification in the background
-    background_tasks.add_task(send_telegram_notification, feedback_dict)
+    # Send notifications in the background
+    background_tasks.add_task(send_feedback_notifications, feedback_dict)
     
     return db_feedback
 

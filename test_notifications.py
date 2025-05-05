@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 import asyncio
 import logging
+import sys
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables at the start
+load_dotenv()
+
+# Now import the module after loading environment variables
 from app.utils.telegram_notifier import send_telegram_notification
 
 # Configure logging
@@ -38,4 +45,5 @@ async def test_telegram_notification():
     return success
 
 if __name__ == "__main__":
-    asyncio.run(test_telegram_notification())
+    success = asyncio.run(test_telegram_notification())
+    sys.exit(0 if success else 1)
