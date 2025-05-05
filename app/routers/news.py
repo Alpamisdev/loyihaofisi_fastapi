@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Path, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 import logging
-from slugify import slugify
 from .. import models, schemas, auth
 from ..database import get_db
+from slugify import slugify
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,475 +17,342 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# Helper function to generate a unique slug
-def generate_unique_slug(db: Session, title: str, language: str, model, existing_id: Optional[int] = None):
-    base_slug = slugify(title)
-    slug = base_slug
-    counter = 1
-    
-    while True:
-        # Check if slug exists for this language
-        query = db.query(model).filter(
-            model.slug == slug,
-            model.language == language
-        )
-        
-        # If we're updating an existing record, exclude it from the check
-        if existing_id:
-            query = query.filter(model.id != existing_id)
-        
-        if not query.first():
-            return slug
-        
-        # Slug exists, append counter and try again
-        slug = f"{base_slug}-{counter}"
-        counter += 1
+# Helper function to validate language
+def validate_language(language: str) -> str:
+    valid_languages = ["en", "ru", "uz", "kk"]
+    if language not in valid_languages:
+        raise ValueError(f"Invalid language: {language}. Must be one of {valid_languages}")
+    return language
 
-# News Categories
-@router.post("/categories/", response_model=schemas.NewsCategory)
-def create_news_category(
-    category: schemas.NewsCategoryCreate, 
+# Single endpoint for creating multilingual news posts
+@router.post("/", response_model=schemas.NewsPostDetail)
+async def create_news(
+    news: schemas.MultilingualNewsCreate,
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
-    # Generate a unique slug if not provided
-    if not category.slug:
-        category.slug = generate_unique_slug(db, category.name, category.language, models.NewsCategory)
-    
-    # Check if category with same slug and language already exists
-    db_category = db.query(models.NewsCategory).filter(
-        models.NewsCategory.slug == category.slug,
-        models.NewsCategory.language == category.language
-    ).first()
-    
-    if db_category:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Category with slug '{category.slug}' already exists for language '{category.language}'"
-        )
-    
-    # Create new category
-    db_category = models.NewsCategory(**category.dict())
-    db.add(db_category)
-    db.commit()
-    db.refresh(db_category)
-    return db_category
-
-@router.get("/categories/", response_model=List[schemas.NewsCategory])
-def read_news_categories(
-    language: Optional[str] = None,
-    skip: int = 0, 
-    limit: int = 100, 
-    db: Session = Depends(get_db)
-):
-    """Get all news categories with optional language filter"""
-    query = db.query(models.NewsCategory)
-    
-    if language:
-        query = query.filter(models.NewsCategory.language == language)
-    
-    categories = query.offset(skip).limit(limit).all()
-    return categories
-
-@router.get("/categories/{category_id}", response_model=schemas.NewsCategory)
-def read_news_category(
-    category_id: int = Path(..., gt=0), 
-    db: Session = Depends(get_db)
-):
-    db_category = db.query(models.NewsCategory).filter(models.NewsCategory.id == category_id).first()
-    if db_category is None:
-        raise HTTPException(status_code=404, detail="News category not found")
-    return db_category
-
-@router.put("/categories/{category_id}", response_model=schemas.NewsCategory)
-def update_news_category(
-    category_id: int = Path(..., gt=0), 
-    category: schemas.NewsCategoryCreate = None, 
-    db: Session = Depends(get_db),
-    current_user: models.AdminUser = Depends(auth.get_current_user)
-):
-    db_category = db.query(models.NewsCategory).filter(models.NewsCategory.id == category_id).first()
-    if db_category is None:
-        raise HTTPException(status_code=404, detail="News category not found")
-    
-    # If slug is being changed, ensure it's unique
-    if category.slug and category.slug != db_category.slug:
-        category.slug = generate_unique_slug(
-            db, 
-            category.name, 
-            category.language, 
-            models.NewsCategory, 
-            existing_id=category_id
-        )
-    
-    # Update category fields
-    for key, value in category.dict().items():
-        setattr(db_category, key, value)
-    
-    db.commit()
-    db.refresh(db_category)
-    return db_category
-
-@router.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_news_category(
-    category_id: int = Path(..., gt=0), 
-    db: Session = Depends(get_db),
-    current_user: models.AdminUser = Depends(auth.get_current_user)
-):
-    db_category = db.query(models.NewsCategory).filter(models.NewsCategory.id == category_id).first()
-    if db_category is None:
-        raise HTTPException(status_code=404, detail="News category not found")
-    
-    db.delete(db_category)
-    db.commit()
-    return None
-
-# News Tags
-@router.post("/tags/", response_model=schemas.NewsTag)
-def create_news_tag(
-    tag: schemas.NewsTagCreate, 
-    db: Session = Depends(get_db),
-    current_user: models.AdminUser = Depends(auth.get_current_user)
-):
-    # Generate a unique slug if not provided
-    if not tag.slug:
-        tag.slug = generate_unique_slug(db, tag.name, tag.language, models.NewsTag)
-    
-    # Check if tag with same slug and language already exists
-    db_tag = db.query(models.NewsTag).filter(
-        models.NewsTag.slug == tag.slug,
-        models.NewsTag.language == tag.language
-    ).first()
-    
-    if db_tag:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Tag with slug '{tag.slug}' already exists for language '{tag.language}'"
-        )
-    
-    # Create new tag
-    db_tag = models.NewsTag(**tag.dict())
-    db.add(db_tag)
-    db.commit()
-    db.refresh(db_tag)
-    return db_tag
-
-@router.get("/tags/", response_model=List[schemas.NewsTag])
-def read_news_tags(
-    language: Optional[str] = None,
-    skip: int = 0, 
-    limit: int = 100, 
-    db: Session = Depends(get_db)
-):
-    """Get all news tags with optional language filter"""
-    query = db.query(models.NewsTag)
-    
-    if language:
-        query = query.filter(models.NewsTag.language == language)
-    
-    tags = query.offset(skip).limit(limit).all()
-    return tags
-
-@router.get("/tags/{tag_id}", response_model=schemas.NewsTag)
-def read_news_tag(
-    tag_id: int = Path(..., gt=0), 
-    db: Session = Depends(get_db)
-):
-    db_tag = db.query(models.NewsTag).filter(models.NewsTag.id == tag_id).first()
-    if db_tag is None:
-        raise HTTPException(status_code=404, detail="News tag not found")
-    return db_tag
-
-@router.put("/tags/{tag_id}", response_model=schemas.NewsTag)
-def update_news_tag(
-    tag_id: int = Path(..., gt=0), 
-    tag: schemas.NewsTagCreate = None, 
-    db: Session = Depends(get_db),
-    current_user: models.AdminUser = Depends(auth.get_current_user)
-):
-    db_tag = db.query(models.NewsTag).filter(models.NewsTag.id == tag_id).first()
-    if db_tag is None:
-        raise HTTPException(status_code=404, detail="News tag not found")
-    
-    # If slug is being changed, ensure it's unique
-    if tag.slug and tag.slug != db_tag.slug:
-        tag.slug = generate_unique_slug(
-            db, 
-            tag.name, 
-            tag.language, 
-            models.NewsTag, 
-            existing_id=tag_id
-        )
-    
-    # Update tag fields
-    for key, value in tag.dict().items():
-        setattr(db_tag, key, value)
-    
-    db.commit()
-    db.refresh(db_tag)
-    return db_tag
-
-@router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_news_tag(
-    tag_id: int = Path(..., gt=0), 
-    db: Session = Depends(get_db),
-    current_user: models.AdminUser = Depends(auth.get_current_user)
-):
-    db_tag = db.query(models.NewsTag).filter(models.NewsTag.id == tag_id).first()
-    if db_tag is None:
-        raise HTTPException(status_code=404, detail="News tag not found")
-    
-    db.delete(db_tag)
-    db.commit()
-    return None
-
-# News Items
-@router.post("/", response_model=schemas.News)
-def create_news_item(
-    news: schemas.NewsCreate, 
-    db: Session = Depends(get_db),
-    current_user: models.AdminUser = Depends(auth.get_current_user)
-):
-    # Generate a unique slug if not provided
-    if not news.slug:
-        news.slug = generate_unique_slug(db, news.title, news.language, models.News)
-    
-    # Check if news with same slug and language already exists
-    db_news = db.query(models.News).filter(
-        models.News.slug == news.slug,
-        models.News.language == news.language
-    ).first()
-    
-    if db_news:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"News with slug '{news.slug}' already exists for language '{news.language}'"
-        )
-    
-    # Set publication date if published
+    """
+    Create a news post with content in all supported languages (English, Russian, Uzbek, and Karakalpak).
+    """
+    # Set publication date if published and not provided
     if news.published and not news.publication_date:
         news.publication_date = datetime.utcnow()
-    
-    # Extract tag_ids and remove from dict
-    tag_ids = news.tag_ids if hasattr(news, 'tag_ids') else []
-    news_data = news.dict(exclude={'tag_ids'})
-    
-    # Create new news item
-    db_news = models.News(**news_data, author_id=current_user.id)
-    db.add(db_news)
-    db.flush()  # Flush to get the ID without committing
-    
-    # Add tags if provided
-    if tag_ids:
-        tags = db.query(models.NewsTag).filter(models.NewsTag.id.in_(tag_ids)).all()
-        db_news.tags = tags
-    
-    db.commit()
-    db.refresh(db_news)
-    return db_news
-
-@router.get("/", response_model=List[schemas.News])
-def read_news_items(
-    language: Optional[str] = None,
-    category_id: Optional[int] = None,
-    tag_id: Optional[int] = None,
-    published_only: bool = True,
-    search: Optional[str] = None,
-    skip: int = 0, 
-    limit: int = 20, 
-    db: Session = Depends(get_db)
-):
-    """Get news items with various filters"""
-    query = db.query(models.News)
-    
-    # Apply filters
-    if language:
-        query = query.filter(models.News.language == language)
-    
-    if category_id:
-        query = query.filter(models.News.category_id == category_id)
-    
-    if tag_id:
-        query = query.join(models.News.tags).filter(models.NewsTag.id == tag_id)
-    
-    if published_only:
-        query = query.filter(
-            models.News.published == True,
-            models.News.publication_date <= datetime.utcnow()
-        )
-    
-    if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            or_(
-                models.News.title.ilike(search_term),
-                models.News.content.ilike(search_term),
-                models.News.summary.ilike(search_term)
-            )
-        )
-    
-    # Order by publication date (newest first)
-    query = query.order_by(models.News.publication_date.desc())
-    
-    # Paginate results
-    news_items = query.offset(skip).limit(limit).all()
-    return news_items
-
-@router.get("/{news_id}", response_model=schemas.NewsWithCategory)
-def read_news_item(
-    news_id: int = Path(..., gt=0), 
-    db: Session = Depends(get_db)
-):
-    # Get news with category and author
-    db_news = db.query(models.News).filter(models.News.id == news_id).first()
-    
-    if db_news is None:
-        raise HTTPException(status_code=404, detail="News item not found")
-    
-    # Increment view count
-    db_news.views += 1
-    db.commit()
-    
-    return db_news
-
-@router.get("/by-slug/{slug}", response_model=schemas.NewsWithCategory)
-def read_news_by_slug(
-    slug: str,
-    language: str,
-    db: Session = Depends(get_db)
-):
-    # Get news with category and author
-    db_news = db.query(models.News).filter(
-        models.News.slug == slug,
-        models.News.language == language
-    ).first()
-    
-    if db_news is None:
-        raise HTTPException(status_code=404, detail="News item not found")
-    
-    # Increment view count
-    db_news.views += 1
-    db.commit()
-    
-    return db_news
-
-@router.put("/{news_id}", response_model=schemas.News)
-def update_news_item(
-    news_id: int = Path(..., gt=0), 
-    news: schemas.NewsUpdate = None, 
-    db: Session = Depends(get_db),
-    current_user: models.AdminUser = Depends(auth.get_current_user)
-):
-    db_news = db.query(models.News).filter(models.News.id == news_id).first()
-    if db_news is None:
-        raise HTTPException(status_code=404, detail="News item not found")
-    
-    # Extract tag_ids and remove from dict
-    tag_ids = news.tag_ids if hasattr(news, 'tag_ids') and news.tag_ids is not None else None
-    news_data = news.dict(exclude={'tag_ids'}, exclude_unset=True)
-    
-    # Set publication date if published status changed to True
-    if news_data.get('published') and not db_news.published and not db_news.publication_date:
-        news_data['publication_date'] = datetime.utcnow()
-    
-    # Update news fields
-    for key, value in news_data.items():
-        setattr(db_news, key, value)
-    
-    # Update tags if provided
-    if tag_ids is not None:
-        tags = db.query(models.NewsTag).filter(models.NewsTag.id.in_(tag_ids)).all()
-        db_news.tags = tags
-    
-    db.commit()
-    db.refresh(db_news)
-    return db_news
-
-@router.delete("/{news_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_news_item(
-    news_id: int = Path(..., gt=0), 
-    db: Session = Depends(get_db),
-    current_user: models.AdminUser = Depends(auth.get_current_user)
-):
-    db_news = db.query(models.News).filter(models.News.id == news_id).first()
-    if db_news is None:
-        raise HTTPException(status_code=404, detail="News item not found")
-    
-    db.delete(db_news)
-    db.commit()
-    return None
-
-@router.post("/{news_id}/translations", response_model=schemas.News)
-def add_news_translation(
-    news_id: int = Path(..., gt=0),
-    translation: schemas.NewsTranslation = None,
-    db: Session = Depends(get_db),
-    current_user: models.AdminUser = Depends(auth.get_current_user)
-):
-    # Get the original news item
-    original_news = db.query(models.News).filter(models.News.id == news_id).first()
-    if original_news is None:
-        raise HTTPException(status_code=404, detail="News item not found")
-    
-    # Check if translation in this language already exists
-    existing_translation = db.query(models.News).filter(
-        models.News.slug == original_news.slug,
-        models.News.language == translation.language
-    ).first()
-    
-    if existing_translation:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Translation in language '{translation.language}' already exists"
-        )
-    
-    # Create new translation
-    new_translation = models.News(
-        slug=original_news.slug,
-        language=translation.language,
-        title=translation.title,
-        content=translation.content,
-        summary=translation.summary,
-        image_url=original_news.image_url,
-        published=original_news.published,
-        publication_date=original_news.publication_date,
-        category_id=original_news.category_id,
+        
+    # Create the news post
+    db_news_post = models.NewsPost(
+        image_url=news.image_url,
+        published=news.published,
+        publication_date=news.publication_date,
         author_id=current_user.id
     )
+    db.add(db_news_post)
+    db.flush()  # Get ID without committing
     
-    db.add(new_translation)
-    db.flush()
+    # Create translations for each language
+    translations = []
     
-    # Copy tags from original news
-    if original_news.tags:
-        # Find equivalent tags in the target language
-        for tag in original_news.tags:
-            target_tag = db.query(models.NewsTag).filter(
-                models.NewsTag.slug == tag.slug,
-                models.NewsTag.language == translation.language
-            ).first()
-            
-            if target_tag:
-                new_translation.tags.append(target_tag)
+    # English translation
+    en_translation = models.NewsTranslation(
+        post_id=db_news_post.id,
+        language="en",
+        title=news.en.title,
+        content=news.en.content,
+        summary=news.en.summary
+    )
+    db.add(en_translation)
+    translations.append(en_translation)
+    
+    # Russian translation
+    ru_translation = models.NewsTranslation(
+        post_id=db_news_post.id,
+        language="ru",
+        title=news.ru.title,
+        content=news.ru.content,
+        summary=news.ru.summary
+    )
+    db.add(ru_translation)
+    translations.append(ru_translation)
+    
+    # Uzbek translation
+    uz_translation = models.NewsTranslation(
+        post_id=db_news_post.id,
+        language="uz",
+        title=news.uz.title,
+        content=news.uz.content,
+        summary=news.uz.summary
+    )
+    db.add(uz_translation)
+    translations.append(uz_translation)
+    
+    # Karakalpak translation
+    kk_translation = models.NewsTranslation(
+        post_id=db_news_post.id,
+        language="kk",
+        title=news.kk.title,
+        content=news.kk.content,
+        summary=news.kk.summary
+    )
+    db.add(kk_translation)
+    translations.append(kk_translation)
     
     db.commit()
-    db.refresh(new_translation)
-    return new_translation
+    db.refresh(db_news_post)
+    
+    return db_news_post
 
-@router.get("/{news_id}/translations", response_model=List[schemas.News])
-def get_news_translations(
-    news_id: int = Path(..., gt=0),
+# Get all news posts without pagination parameters
+@router.get("/", response_model=List[schemas.NewsPostSummary])
+async def get_news_posts(
+    language: Optional[str] = None,
+    published_only: bool = True,
+    search: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    # Get the original news item
-    original_news = db.query(models.News).filter(models.News.id == news_id).first()
-    if original_news is None:
-        raise HTTPException(status_code=404, detail="News item not found")
+    """
+    Get all news posts with optional filtering by language and search term.
+    Returns a simplified summary of each post.
+    """
+    query = db.query(models.NewsPost)
     
-    # Get all translations (all news items with the same slug but different languages)
-    translations = db.query(models.News).filter(
-        models.News.slug == original_news.slug,
-        models.News.id != news_id
-    ).all()
+    # Filter by published status
+    if published_only:
+        query = query.filter(
+            models.NewsPost.published == True,
+            models.NewsPost.publication_date <= datetime.utcnow()
+        )
     
-    return translations
+    # Apply search if provided
+    if search:
+        search_term = f"%{search}%"
+        query = query.join(models.NewsTranslation).filter(
+            or_(
+                models.NewsTranslation.title.ilike(search_term),
+                models.NewsTranslation.content.ilike(search_term),
+                models.NewsTranslation.summary.ilike(search_term)
+            )
+        )
+        
+        # If language is specified, filter translations by language
+        if language:
+            try:
+                language = validate_language(language)
+                query = query.filter(models.NewsTranslation.language == language)
+            except ValueError:
+                # If invalid language, just ignore the language filter
+                pass
+    
+    # Order by publication date (newest first)
+    query = query.order_by(models.NewsPost.publication_date.desc())
+    
+    # Make query distinct to avoid duplicates from the join
+    query = query.distinct()
+    
+    # Get all results without pagination
+    news_posts = query.all()
+    
+    # For each post, get the translation in the requested language or default to English
+    result = []
+    for post in news_posts:
+        post_data = {
+            "id": post.id,
+            "image_url": post.image_url,
+            "published": post.published,
+            "publication_date": post.publication_date,
+            "created_at": post.created_at,
+            "updated_at": post.updated_at,
+            "views": post.views,
+            "translations": []
+        }
+        
+        # Get translations
+        translations = db.query(models.NewsTranslation).filter(
+            models.NewsTranslation.post_id == post.id
+        )
+        
+        # If language is specified, prioritize that language
+        if language:
+            try:
+                lang = validate_language(language)
+                translation = translations.filter(models.NewsTranslation.language == lang).first()
+                if translation:
+                    post_data["translations"].append({
+                        "language": translation.language,
+                        "title": translation.title,
+                        "summary": translation.summary
+                    })
+            except ValueError:
+                pass
+        
+        # If no language specified or translation not found, include all translations
+        if not language or not post_data["translations"]:
+            for translation in translations.all():
+                post_data["translations"].append({
+                    "language": translation.language,
+                    "title": translation.title,
+                    "summary": translation.summary
+                })
+        
+        result.append(post_data)
+    
+    return result
+
+# Get a specific news post by ID with all translations
+@router.get("/{post_id}", response_model=schemas.NewsPostDetail)
+async def get_news_post(
+    post_id: int = Path(..., gt=0),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a specific news post by ID with all translations.
+    """
+    db_news_post = db.query(models.NewsPost).filter(models.NewsPost.id == post_id).first()
+    
+    if db_news_post is None:
+        raise HTTPException(status_code=404, detail="News post not found")
+    
+    # Increment view count
+    db_news_post.views += 1
+    db.commit()
+    
+    return db_news_post
+
+# Get a specific news post by ID with a specific language
+@router.get("/{post_id}/{language}", response_model=Dict)
+async def get_news_post_by_language(
+    post_id: int = Path(..., gt=0),
+    language: str = Path(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a specific news post by ID with a specific language.
+    """
+    try:
+        language = validate_language(language)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid language: {language}")
+    
+    db_news_post = db.query(models.NewsPost).filter(models.NewsPost.id == post_id).first()
+    
+    if db_news_post is None:
+        raise HTTPException(status_code=404, detail="News post not found")
+    
+    # Get the translation for the specified language
+    translation = db.query(models.NewsTranslation).filter(
+        models.NewsTranslation.post_id == post_id,
+        models.NewsTranslation.language == language
+    ).first()
+    
+    if translation is None:
+        raise HTTPException(status_code=404, detail=f"Translation not found for language: {language}")
+    
+    # Increment view count
+    db_news_post.views += 1
+    db.commit()
+    
+    # Combine post and translation data
+    result = {
+        "id": db_news_post.id,
+        "image_url": db_news_post.image_url,
+        "published": db_news_post.published,
+        "publication_date": db_news_post.publication_date,
+        "created_at": db_news_post.created_at,
+        "updated_at": db_news_post.updated_at,
+        "views": db_news_post.views,
+        "language": language,
+        "title": translation.title,
+        "content": translation.content,
+        "summary": translation.summary
+    }
+    
+    return result
+
+# Update a news post
+@router.put("/{post_id}", response_model=schemas.NewsPostDetail)
+async def update_news_post(
+    post_id: int = Path(..., gt=0),
+    news: schemas.MultilingualNewsUpdate = None,
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    """
+    Update a news post with multilingual content.
+    """
+    db_news_post = db.query(models.NewsPost).filter(models.NewsPost.id == post_id).first()
+    
+    if db_news_post is None:
+        raise HTTPException(status_code=404, detail="News post not found")
+    
+    if news is None:
+        raise HTTPException(status_code=400, detail="Request body is required")
+    
+    # Update post fields
+    if news.image_url is not None:
+        db_news_post.image_url = news.image_url
+    
+    if news.published is not None:
+        db_news_post.published = news.published
+        # Set publication date if published status changed to True
+        if news.published and not db_news_post.publication_date:
+            db_news_post.publication_date = datetime.utcnow()
+    
+    if news.publication_date is not None:
+        db_news_post.publication_date = news.publication_date
+    
+    # Update translations
+    languages = ["en", "ru", "uz", "kk"]
+    for lang in languages:
+        if hasattr(news, lang) and getattr(news, lang) is not None:
+            lang_data = getattr(news, lang)
+            
+            # Check if translation exists
+            db_translation = db.query(models.NewsTranslation).filter(
+                models.NewsTranslation.post_id == post_id,
+                models.NewsTranslation.language == lang
+            ).first()
+            
+            if db_translation:
+                # Update existing translation
+                if hasattr(lang_data, "title") and lang_data.title is not None:
+                    db_translation.title = lang_data.title
+                if hasattr(lang_data, "content") and lang_data.content is not None:
+                    db_translation.content = lang_data.content
+                if hasattr(lang_data, "summary") and lang_data.summary is not None:
+                    db_translation.summary = lang_data.summary
+                db_translation.updated_at = datetime.utcnow()
+            else:
+                # Create new translation
+                db_translation = models.NewsTranslation(
+                    post_id=post_id,
+                    language=lang,
+                    title=lang_data.title,
+                    content=lang_data.content,
+                    summary=lang_data.summary
+                )
+                db.add(db_translation)
+    
+    db_news_post.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(db_news_post)
+    
+    return db_news_post
+
+# Delete a news post
+@router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_news_post(
+    post_id: int = Path(..., gt=0),
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    """
+    Delete a news post and all its translations.
+    """
+    db_news_post = db.query(models.NewsPost).filter(models.NewsPost.id == post_id).first()
+    
+    if db_news_post is None:
+        raise HTTPException(status_code=404, detail="News post not found")
+    
+    # Delete the post (translations will be deleted automatically due to cascade)
+    db.delete(db_news_post)
+    db.commit()
+    
+    return None

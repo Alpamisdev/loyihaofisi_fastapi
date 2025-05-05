@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Union
+from pydantic import BaseModel, Field, validator
+from typing import Optional, List, Union, Dict
 from datetime import datetime
 from enum import Enum
 
@@ -251,82 +251,108 @@ class TokenRefreshRequest(BaseModel):
 class TokenRevokeRequest(BaseModel):
     refresh_token: str
 
-# Multilingual News Schemas
-class NewsCategoryBase(BaseModel):
-    slug: str
-    language: str
-    name: str
-    description: Optional[str] = None
-
-class NewsCategoryCreate(NewsCategoryBase):
-    pass
-
-class NewsCategory(NewsCategoryBase):
-    id: int
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
-
-class NewsTagBase(BaseModel):
-    slug: str
-    language: str
-    name: str
-
-class NewsTagCreate(NewsTagBase):
-    pass
-
-class NewsTag(NewsTagBase):
-    id: int
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
-
-class NewsBase(BaseModel):
-    slug: str
+# News Translation Schema
+class NewsTranslationBase(BaseModel):
     language: str
     title: str
     content: Optional[str] = None
     summary: Optional[str] = None
+
+class NewsTranslationCreate(NewsTranslationBase):
+    pass
+
+class NewsTranslation(NewsTranslationBase):
+    id: int
+    post_id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+# News Post Schema
+class NewsPostBase(BaseModel):
     image_url: Optional[str] = None
     published: bool = False
     publication_date: Optional[datetime] = None
-    category_id: Optional[int] = None
 
-class NewsCreate(NewsBase):
-    tag_ids: Optional[List[int]] = None
+class NewsPostCreate(NewsPostBase):
+    translations: List[NewsTranslationCreate]
 
-class NewsUpdate(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    summary: Optional[str] = None
-    image_url: Optional[str] = None
-    published: Optional[bool] = None
-    publication_date: Optional[datetime] = None
-    category_id: Optional[int] = None
-    tag_ids: Optional[List[int]] = None
+class NewsPostUpdate(NewsPostBase):
+    translations: Optional[List[NewsTranslationCreate]] = None
 
-class News(NewsBase):
+class NewsPost(NewsPostBase):
     id: int
     created_at: datetime
     updated_at: datetime
     author_id: Optional[int] = None
     views: int
-    tags: List["NewsTag"] = []
     
     class Config:
         from_attributes = True
 
-class NewsWithCategory(News):
-    category: Optional["NewsCategory"] = None
-    author: Optional["AdminUser"] = None
+class NewsPostDetail(NewsPost):
+    translations: List[NewsTranslation] = []
+    author: Optional[AdminUser] = None
     
     class Config:
         from_attributes = True
 
-class NewsTranslation(BaseModel):
+# Schema for translation summary in list view
+class TranslationSummary(BaseModel):
     language: str
+    title: str
+    summary: Optional[str] = None
+
+# Schema for news post summary in list view
+class NewsPostSummary(BaseModel):
+    id: int
+    image_url: Optional[str] = None
+    published: bool
+    publication_date: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    views: int
+    translations: List[TranslationSummary] = []
+    
+    class Config:
+        from_attributes = True
+
+# New schema for multilingual news content
+class MultilingualNewsContent(BaseModel):
     title: str
     content: Optional[str] = None
     summary: Optional[str] = None
+
+# New schema for multilingual news creation
+class MultilingualNewsCreate(BaseModel):
+    image_url: Optional[str] = None
+    published: bool = False
+    publication_date: Optional[datetime] = None
+    en: MultilingualNewsContent
+    ru: MultilingualNewsContent
+    uz: MultilingualNewsContent
+    kk: MultilingualNewsContent
+    
+    @validator('publication_date', pre=True, always=True)
+    def set_publication_date(cls, v, values):
+        if values.get('published', False) and not v:
+            return datetime.utcnow()
+        return v
+
+# New schema for multilingual news update
+class MultilingualNewsUpdate(BaseModel):
+    image_url: Optional[str] = None
+    published: Optional[bool] = None
+    publication_date: Optional[datetime] = None
+    en: Optional[MultilingualNewsContent] = None
+    ru: Optional[MultilingualNewsContent] = None
+    uz: Optional[MultilingualNewsContent] = None
+    kk: Optional[MultilingualNewsContent] = None
+    
+    @validator('publication_date', pre=True, always=True)
+    def set_publication_date(cls, v, values):
+        if values.get('published', False) and not v:
+            return datetime.utcnow()
+        return v

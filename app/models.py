@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Index, Table
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Index, Table, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -163,7 +163,7 @@ class AdminUser(Base):
     
     # Add relationship to refresh tokens
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
-    news_items = relationship("News", back_populates="author")
+    news_items = relationship("NewsPost", back_populates="author")
 
 # Refresh Tokens with improved indexes
 class RefreshToken(Base):
@@ -200,68 +200,43 @@ class UploadedFile(Base):
     created_at = Column(DateTime, default=func.now())
     uploaded_by = Column(Integer, ForeignKey("admin_users.id"), nullable=True)
 
-# News Tags Association Table (Many-to-Many)
-news_tags_association = Table(
-    'news_tags_association',
-    Base.metadata,
-    Column('news_id', Integer, ForeignKey('news.id'), primary_key=True),
-    Column('tag_id', Integer, ForeignKey('news_tags.id'), primary_key=True)
-)
+# Replace the News, NewsTag, and NewsCategory models with this simplified structure
 
-# Multilingual News System
-class NewsCategory(Base):
-    __tablename__ = "news_categories"
+# News system with multilingual support
+class NewsPost(Base):
+    __tablename__ = "news_posts"
     
     id = Column(Integer, primary_key=True, index=True)
-    slug = Column(String, nullable=False, index=True)
-    language = Column(String, nullable=False, index=True)
-    name = Column(String, nullable=False)
-    description = Column(Text)
-    created_at = Column(DateTime, default=func.now())
-    
-    news_items = relationship("News", back_populates="category")
-    
-    __table_args__ = (
-        Index('ix_news_categories_slug_language', 'slug', 'language', unique=True),
-    )
-
-class NewsTag(Base):
-    __tablename__ = "news_tags"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    slug = Column(String, nullable=False, index=True)
-    language = Column(String, nullable=False, index=True)
-    name = Column(String, nullable=False)
-    created_at = Column(DateTime, default=func.now())
-    
-    news_items = relationship("News", secondary=news_tags_association, back_populates="tags")
-    
-    __table_args__ = (
-        Index('ix_news_tags_slug_language', 'slug', 'language', unique=True),
-    )
-
-class News(Base):
-    __tablename__ = "news"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    slug = Column(String, nullable=False, index=True)
-    language = Column(String, nullable=False, index=True)
-    title = Column(String, nullable=False)
-    content = Column(Text)
-    summary = Column(Text)
     image_url = Column(String)
     published = Column(Boolean, default=False, index=True)
     publication_date = Column(DateTime, index=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     author_id = Column(Integer, ForeignKey("admin_users.id"))
-    category_id = Column(Integer, ForeignKey("news_categories.id"))
     views = Column(Integer, default=0)
     
+    # Relationships
     author = relationship("AdminUser", back_populates="news_items")
-    category = relationship("NewsCategory", back_populates="news_items")
-    tags = relationship("NewsTag", secondary=news_tags_association, back_populates="news_items")
+    translations = relationship("NewsTranslation", back_populates="post", cascade="all, delete-orphan")
+
+class NewsTranslation(Base):
+    __tablename__ = "news_translations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("news_posts.id", ondelete="CASCADE"), index=True)
+    language = Column(String, nullable=False, index=True)  # 'en', 'ru', 'uz', 'kk'
+    title = Column(String, nullable=False)
+    content = Column(Text)
+    summary = Column(Text)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relationship
+    post = relationship("NewsPost", back_populates="translations")
     
     __table_args__ = (
-        Index('ix_news_slug_language', 'slug', 'language', unique=True),
+        # Ensure unique combination of post_id and language
+        UniqueConstraint('post_id', 'language', name='uix_post_language'),
     )
+
+# Remove the news_tags_association table and NewsTag, NewsCategory classes
