@@ -13,18 +13,18 @@ def format_feedback_for_telegram(feedback: Dict[str, Any]) -> str:
     
     # Create a concise message for Telegram with effective formatting
     message = f"""
-📬 *New Feedback Received*
+📬 *Múrájat*
 
-🏷️ *Theme:* {feedback.get('theme', 'Not specified')}
-👤 *From:* {feedback.get('full_name', 'Not provided')}
+🏷️ *Tema:* {feedback.get('theme', 'Not specified')}
+👤 *FIO:* {feedback.get('full_name', 'Not provided')}
 
-📱 *Contact:* {feedback.get('phone_number', 'Not provided')}
+📱 *Telefon:* {feedback.get('phone_number', 'Not provided')}
 📧 *Email:* {feedback.get('email', 'Not provided')}
 
-📝 *Message:*
+📝 *Xabar:*
 _{feedback.get('text', 'No message')}_
 
-⏰ Received at: {created_at}
+⏰ Kelip túsken waqtı: {created_at}
     """
     
     return message
