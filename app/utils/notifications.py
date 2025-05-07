@@ -23,15 +23,15 @@ def format_feedback_for_telegram(feedback: Dict[str, Any]) -> str:
     
     # Create a concise message for Telegram
     message = f"""
-📬 *New Feedback*
-🏷️ *Theme:* {feedback.get('theme', 'Not specified')}
-👤 *From:* {feedback.get('full_name', 'Not provided')}
-📱 *Phone:* {feedback.get('phone_number', 'Not provided')}
+📬 *Múrájat*
+🏷️ *Tema:* {feedback.get('theme', 'Not specified')}
+👤 *FIO:* {feedback.get('full_name', 'Not provided')}
+📱 *Telefon:* {feedback.get('phone_number', 'Not provided')}
 📧 *Email:* {feedback.get('email', 'Not provided')}
-📝 *Message:* 
+📝 *Xabar:* 
 {feedback.get('text', 'No message')}
 
-⏰ Received at: {created_at}
+⏰ Kelip túsken waqtı: {created_at}
     """
     
     return message
