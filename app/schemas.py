@@ -53,15 +53,161 @@ class StaffBase(BaseModel):
     photo: Optional[str] = None
     address: Optional[str] = None  # Ensure this is Optional
 
+# Blog schemas - Updated for multilingual support
 class BlogCategoryBase(BaseModel):
     name: str
 
+class BlogCategoryTranslationBase(BaseModel):
+    language: str
+    name: str
+
+class BlogCategoryTranslation(BlogCategoryTranslationBase):
+    id: int
+    category_id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class BlogCategory(BlogCategoryBase):
+    id: int
+    translations: Optional[List[BlogCategoryTranslation]] = []
+    
+    class Config:
+        from_attributes = True
+
+# Blog category translation schemas
+class BlogCategoryNameContent(BaseModel):
+    name: str
+
+# New schema for multilingual blog category creation
+class MultilingualBlogCategoryCreate(BaseModel):
+    en: BlogCategoryNameContent
+    ru: BlogCategoryNameContent
+    uz: BlogCategoryNameContent
+    kk: BlogCategoryNameContent
+
+# New schema for multilingual blog category update
+class MultilingualBlogCategoryUpdate(BaseModel):
+    en: Optional[BlogCategoryNameContent] = None
+    ru: Optional[BlogCategoryNameContent] = None
+    uz: Optional[BlogCategoryNameContent] = None
+    kk: Optional[BlogCategoryNameContent] = None
+
+# Enhanced blog category detail schema
+class BlogCategoryDetail(BlogCategoryBase):
+    id: int
+    translations: List[BlogCategoryTranslation] = []
+    
+    class Config:
+        from_attributes = True
+
+# Legacy BlogItem schemas for backward compatibility
 class BlogItemBase(BaseModel):
     category_id: int
     title: str
     img_or_video_link: Optional[str] = None
     intro_text: Optional[str] = None
     text: Optional[str] = None
+
+class BlogItem(BlogItemBase):
+    id: int
+    date_time: datetime
+    views: int
+    
+    class Config:
+        from_attributes = True
+
+# New multilingual blog schemas
+class BlogTranslationBase(BaseModel):
+    language: str
+    title: str
+    intro_text: Optional[str] = None
+    text: Optional[str] = None
+
+class BlogTranslationCreate(BlogTranslationBase):
+    pass
+
+class BlogTranslation(BlogTranslationBase):
+    id: int
+    post_id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class BlogPostBase(BaseModel):
+    category_id: int
+    img_or_video_link: Optional[str] = None
+    published: bool = True
+
+class BlogPostCreate(BlogPostBase):
+    translations: List[BlogTranslationCreate]
+
+class BlogPostUpdate(BlogPostBase):
+    translations: Optional[List[BlogTranslationCreate]] = None
+
+class BlogPost(BlogPostBase):
+    id: int
+    date_time: datetime
+    views: int
+    
+    class Config:
+        from_attributes = True
+
+class BlogPostDetail(BlogPost):
+    translations: List[BlogTranslation] = []
+    category: Optional[BlogCategory] = None
+    
+    class Config:
+        from_attributes = True
+
+# Schema for blog translation summary in list view
+class BlogTranslationSummary(BaseModel):
+    language: str
+    title: str
+    intro_text: Optional[str] = None
+
+# Schema for blog post summary in list view
+class BlogPostSummary(BaseModel):
+    id: int
+    category_id: int
+    img_or_video_link: Optional[str] = None
+    date_time: datetime
+    views: int
+    published: bool
+    translations: List[BlogTranslationSummary] = []
+    
+    class Config:
+        from_attributes = True
+
+# New schema for multilingual blog content
+class MultilingualBlogContent(BaseModel):
+    title: str
+    intro_text: Optional[str] = None
+    text: Optional[str] = None
+
+# New schema for multilingual blog creation
+class MultilingualBlogCreate(BaseModel):
+    category_id: int
+    img_or_video_link: Optional[str] = None
+    published: bool = True
+    en: MultilingualBlogContent
+    ru: MultilingualBlogContent
+    uz: MultilingualBlogContent
+    kk: MultilingualBlogContent
+
+# New schema for multilingual blog update
+class MultilingualBlogUpdate(BaseModel):
+    category_id: Optional[int] = None
+    img_or_video_link: Optional[str] = None
+    published: Optional[bool] = None
+    en: Optional[MultilingualBlogContent] = None
+    ru: Optional[MultilingualBlogContent] = None
+    uz: Optional[MultilingualBlogContent] = None
+    kk: Optional[MultilingualBlogContent] = None
 
 class AboutCompanyBase(BaseModel):
     title: str
@@ -153,20 +299,6 @@ class Feedback(FeedbackBase):
 
 class Staff(StaffBase):
     id: int
-    
-    class Config:
-        from_attributes = True
-
-class BlogCategory(BlogCategoryBase):
-    id: int
-    
-    class Config:
-        from_attributes = True
-
-class BlogItem(BlogItemBase):
-    id: int
-    date_time: datetime
-    views: int
     
     class Config:
         from_attributes = True

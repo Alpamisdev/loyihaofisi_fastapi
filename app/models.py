@@ -62,15 +62,75 @@ class Staff(Base):
     photo = Column(String)
     address = Column(String, nullable=True)  # Explicitly set nullable=True
 
-# Blog
+# Blog - Updated for multilingual support
 class BlogCategory(Base):
     __tablename__ = "blog_categories"
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     
+    # Updated relationship to point to BlogPost instead of BlogItem
+    blog_posts = relationship("BlogPost", back_populates="category")
+    # Keep the old relationship for backward compatibility
     blog_items = relationship("BlogItem", back_populates="category")
+    
+    # Add translations relationship
+    translations = relationship("BlogCategoryTranslation", back_populates="category", cascade="all, delete-orphan")
 
+class BlogCategoryTranslation(Base):
+    __tablename__ = "blog_category_translations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    category_id = Column(Integer, ForeignKey("blog_categories.id", ondelete="CASCADE"), index=True)
+    language = Column(String, nullable=False, index=True)  # 'en', 'ru', 'uz', 'kk'
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relationship
+    category = relationship("BlogCategory", back_populates="translations")
+    
+    __table_args__ = (
+        # Ensure unique combination of category_id and language
+        UniqueConstraint('category_id', 'language', name='uix_blog_category_language'),
+    )
+
+# New model for multilingual blog posts
+class BlogPost(Base):
+    __tablename__ = "blog_posts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    category_id = Column(Integer, ForeignKey("blog_categories.id"))
+    img_or_video_link = Column(String)
+    date_time = Column(DateTime, default=func.now())
+    views = Column(Integer, default=0)
+    published = Column(Boolean, default=True, index=True)
+    
+    # Relationships
+    category = relationship("BlogCategory", back_populates="blog_posts")
+    translations = relationship("BlogTranslation", back_populates="post", cascade="all, delete-orphan")
+
+class BlogTranslation(Base):
+    __tablename__ = "blog_translations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("blog_posts.id", ondelete="CASCADE"), index=True)
+    language = Column(String, nullable=False, index=True)  # 'en', 'ru', 'uz', 'kk'
+    title = Column(String, nullable=False)
+    text = Column(Text)
+    intro_text = Column(Text)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relationship
+    post = relationship("BlogPost", back_populates="translations")
+    
+    __table_args__ = (
+        # Ensure unique combination of post_id and language
+        UniqueConstraint('post_id', 'language', name='uix_blog_post_language'),
+    )
+
+# Keep the old BlogItem model for backward compatibility
 class BlogItem(Base):
     __tablename__ = "blog_items"
     
@@ -201,8 +261,6 @@ class UploadedFile(Base):
     created_at = Column(DateTime, default=func.now())
     uploaded_by = Column(Integer, ForeignKey("admin_users.id"), nullable=True)
 
-# Replace the News, NewsTag, and NewsCategory models with this simplified structure
-
 # News system with multilingual support
 class NewsPost(Base):
     __tablename__ = "news_posts"
@@ -239,5 +297,3 @@ class NewsTranslation(Base):
         # Ensure unique combination of post_id and language
         UniqueConstraint('post_id', 'language', name='uix_post_language'),
     )
-
-# Remove the news_tags_association table and NewsTag, NewsCategory classes

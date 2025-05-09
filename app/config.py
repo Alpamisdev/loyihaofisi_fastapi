@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Base URL for file access - defaults to None which will use the request's base URL
-BASE_URL = os.getenv("BASE_URL", "https://api.alpamis.space")
+BASE_URL = os.getenv("BASE_URL", "https://backend.loyihaofisi.uz")
 
 # JWT Settings
 SECRET_KEY = os.getenv("SECRET_KEY", "YOUR_SECRET_KEY_HERE")  # In production, use a secure random key
