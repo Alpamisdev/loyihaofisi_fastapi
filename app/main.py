@@ -412,10 +412,14 @@ async def http_exception_handler(request, exc):
         content={"detail": exc.detail},
     )
 
+# Find the static files mounting code and ensure it's set up correctly
+# It should look something like this:
+
 # Create directories for static files if they don't exist
 os.makedirs("static/uploads", exist_ok=True)
 os.makedirs("static/images", exist_ok=True)
 os.makedirs("static/files", exist_ok=True)
+os.makedirs("static/documents", exist_ok=True)  # Add this line for documents
 
 # Mount static files directory
 app.mount("/static", StaticFiles(directory="static"), name="static")

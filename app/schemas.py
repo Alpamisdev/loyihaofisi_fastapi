@@ -232,6 +232,12 @@ class DocumentItemBase(BaseModel):
     name: Optional[str] = None
     link: str
 
+class DocumentItem(DocumentItemBase):
+    id: int
+    
+    class Config:
+        from_attributes = True
+
 class MenuLinkBase(BaseModel):
     menu_id: int
     target_type: str
@@ -326,12 +332,6 @@ class AboutCompanyCategoryItem(AboutCompanyCategoryItemBase):
         from_attributes = True
 
 class DocumentCategory(DocumentCategoryBase):
-    id: int
-    
-    class Config:
-        from_attributes = True
-
-class DocumentItem(DocumentItemBase):
     id: int
     
     class Config:
