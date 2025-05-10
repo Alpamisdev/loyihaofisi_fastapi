@@ -41,13 +41,14 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=["http://localhost:3000","http://localhost:3001","https://loyiha-qq.netlify.app/","https://loyihaofisi.uz","https://loyiha-qq.netlify.app"],  # List specific origins
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition", "Content-Length", "Content-Type"],
-    max_age=600,  # Cache preflight requests for 10 minutes
+    max_age=600,
 )
+
 
 # Include routers
 app.include_router(menu.router)
