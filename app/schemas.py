@@ -167,7 +167,7 @@ class BlogPostDetail(BlogPost):
 # Schema for blog translation summary in list view
 class BlogTranslationSummary(BaseModel):
     language: str
-    title: str
+    title: Optional[str] = ""
     intro_text: Optional[str] = None
 
 # Schema for blog post summary in list view

@@ -494,7 +494,7 @@ async def get_blog_posts(
     try:
         logger.info(f"Fetching blog posts with params: language={language}, published_only={published_only}, category_id={category_id}, search={search}")
         
-        # Start with a base query
+        # Start with a base query - use a simple query first to avoid join issues
         query = db.query(models.BlogPost)
         
         # Filter by published status
@@ -505,7 +505,7 @@ async def get_blog_posts(
         if category_id is not None:
             query = query.filter(models.BlogPost.category_id == category_id)
         
-        # Apply search if provided
+        # Apply search if provided - only add joins when necessary
         if search:
             search_term = f"%{search}%"
             # Use outerjoin instead of join to avoid filtering out posts without translations
@@ -531,14 +531,15 @@ async def get_blog_posts(
         query = query.order_by(models.BlogPost.date_time.desc())
         
         # Make query distinct to avoid duplicates from the join
-        query = query.distinct()
+        if search:  # Only need distinct if we did a join
+            query = query.distinct()
         
         # Execute the query and handle potential database errors
         try:
             blog_posts = query.all()
             logger.info(f"Found {len(blog_posts)} blog posts")
         except Exception as db_error:
-            logger.error(f"Database error when fetching blog posts: {str(db_error)}")
+            logger.error(f"Database error when fetching blog posts: {str(db_error)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error occurred while fetching blog posts"
@@ -546,60 +547,94 @@ async def get_blog_posts(
         
         # For each post, get the translation in the requested language or default to English
         result = []
-        for post in blog_posts:
-            post_data = {
-                "id": post.id,
-                "category_id": post.category_id,
-                "img_or_video_link": post.img_or_video_link,
-                "date_time": post.date_time,
-                "views": post.views,
-                "published": post.published,
-                "translations": []
-            }
-            
-            # Get translations safely
+        for post_index, post in enumerate(blog_posts):
             try:
-                # Get translations
-                translations = db.query(models.BlogTranslation).filter(
-                    models.BlogTranslation.post_id == post.id
-                )
+                # Skip posts with missing required fields
+                if post.id is None or post.category_id is None:
+                    logger.warning(f"Skipping post at index {post_index} due to missing required fields")
+                    continue
                 
-                # If language is specified, prioritize that language
-                if language:
-                    try:
-                        lang = validate_language(language)
-                        translation = translations.filter(models.BlogTranslation.language == lang).first()
-                        if translation:
+                post_data = {
+                    "id": post.id,
+                    "category_id": post.category_id,
+                    "img_or_video_link": post.img_or_video_link,
+                    "date_time": post.date_time or datetime.utcnow(),  # Provide default if None
+                    "views": post.views or 0,  # Provide default if None
+                    "published": post.published if post.published is not None else True,  # Provide default if None
+                    "translations": []
+                }
+                
+                # Get translations safely
+                try:
+                    # Get translations
+                    translations = db.query(models.BlogTranslation).filter(
+                        models.BlogTranslation.post_id == post.id
+                    ).all()
+                    
+                    # If no translations found, log warning but don't fail
+                    if not translations:
+                        logger.warning(f"No translations found for post ID {post.id}")
+                        # Add post with empty translations array
+                        result.append(post_data)
+                        continue
+                    
+                    # If language is specified, prioritize that language
+                    if language:
+                        try:
+                            lang = validate_language(language)
+                            matching_translations = [t for t in translations if t.language == lang]
+                            
+                            if matching_translations:
+                                for translation in matching_translations:
+                                    post_data["translations"].append({
+                                        "language": translation.language,
+                                        "title": translation.title or "",  # Provide default if None
+                                        "intro_text": translation.intro_text or ""  # Provide default if None
+                                    })
+                            else:
+                                # If no translation in requested language, include first available
+                                if translations:
+                                    translation = translations[0]
+                                    post_data["translations"].append({
+                                        "language": translation.language,
+                                        "title": translation.title or "",
+                                        "intro_text": translation.intro_text or ""
+                                    })
+                        except ValueError:
+                            # If invalid language, include all translations
+                            for translation in translations:
+                                post_data["translations"].append({
+                                    "language": translation.language,
+                                    "title": translation.title or "",
+                                    "intro_text": translation.intro_text or ""
+                                })
+                    else:
+                        # If no language specified, include all translations
+                        for translation in translations:
                             post_data["translations"].append({
                                 "language": translation.language,
-                                "title": translation.title,
-                                "intro_text": translation.intro_text
+                                "title": translation.title or "",
+                                "intro_text": translation.intro_text or ""
                             })
-                    except ValueError:
-                        pass
-                
-                # If no language specified or translation not found, include all translations
-                if not language or not post_data["translations"]:
-                    for translation in translations.all():
-                        post_data["translations"].append({
-                            "language": translation.language,
-                            "title": translation.title,
-                            "intro_text": translation.intro_text
-                        })
-                
-                # Only add posts that have at least one translation
-                if post_data["translations"]:
-                    result.append(post_data)
-                else:
-                    logger.warning(f"Skipping post ID {post.id} as it has no translations")
                     
-            except Exception as e:
-                logger.error(f"Error processing translations for post {post.id}: {str(e)}")
+                    # Add post to results
+                    result.append(post_data)
+                    
+                except Exception as translation_error:
+                    logger.error(f"Error processing translations for post {post.id}: {str(translation_error)}", exc_info=True)
+                    # Still include the post even if translations failed
+                    result.append(post_data)
+                    
+            except Exception as post_error:
+                logger.error(f"Error processing post at index {post_index}: {str(post_error)}", exc_info=True)
                 # Continue with next post instead of failing the entire request
                 continue
         
         return result
         
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in get_blog_posts: {str(e)}", exc_info=True)
         raise HTTPException(
