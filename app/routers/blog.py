@@ -491,89 +491,121 @@ async def get_blog_posts(
     Get all blog posts with optional filtering by language, category, and search term.
     Returns a simplified summary of each post.
     """
-    query = db.query(models.BlogPost)
-    
-    # Filter by published status
-    if published_only:
-        query = query.filter(models.BlogPost.published == True)
-    
-    # Filter by category if provided
-    if category_id is not None:
-        query = query.filter(models.BlogPost.category_id == category_id)
-    
-    # Apply search if provided
-    if search:
-        search_term = f"%{search}%"
-        query = query.join(models.BlogTranslation).filter(
-            or_(
-                models.BlogTranslation.title.ilike(search_term),
-                models.BlogTranslation.text.ilike(search_term),
-                models.BlogTranslation.intro_text.ilike(search_term)
+    try:
+        logger.info(f"Fetching blog posts with params: language={language}, published_only={published_only}, category_id={category_id}, search={search}")
+        
+        # Start with a base query
+        query = db.query(models.BlogPost)
+        
+        # Filter by published status
+        if published_only:
+            query = query.filter(models.BlogPost.published == True)
+        
+        # Filter by category if provided
+        if category_id is not None:
+            query = query.filter(models.BlogPost.category_id == category_id)
+        
+        # Apply search if provided
+        if search:
+            search_term = f"%{search}%"
+            # Use outerjoin instead of join to avoid filtering out posts without translations
+            query = query.outerjoin(models.BlogTranslation).filter(
+                or_(
+                    models.BlogTranslation.title.ilike(search_term),
+                    models.BlogTranslation.text.ilike(search_term),
+                    models.BlogTranslation.intro_text.ilike(search_term)
+                )
             )
-        )
+            
+            # If language is specified, filter translations by language
+            if language:
+                try:
+                    language = validate_language(language)
+                    query = query.filter(models.BlogTranslation.language == language)
+                except ValueError as e:
+                    logger.warning(f"Invalid language parameter: {e}")
+                    # If invalid language, just ignore the language filter
+                    pass
         
-        # If language is specified, filter translations by language
-        if language:
+        # Order by date (newest first)
+        query = query.order_by(models.BlogPost.date_time.desc())
+        
+        # Make query distinct to avoid duplicates from the join
+        query = query.distinct()
+        
+        # Execute the query and handle potential database errors
+        try:
+            blog_posts = query.all()
+            logger.info(f"Found {len(blog_posts)} blog posts")
+        except Exception as db_error:
+            logger.error(f"Database error when fetching blog posts: {str(db_error)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error occurred while fetching blog posts"
+            )
+        
+        # For each post, get the translation in the requested language or default to English
+        result = []
+        for post in blog_posts:
+            post_data = {
+                "id": post.id,
+                "category_id": post.category_id,
+                "img_or_video_link": post.img_or_video_link,
+                "date_time": post.date_time,
+                "views": post.views,
+                "published": post.published,
+                "translations": []
+            }
+            
+            # Get translations safely
             try:
-                language = validate_language(language)
-                query = query.filter(models.BlogTranslation.language == language)
-            except ValueError:
-                # If invalid language, just ignore the language filter
-                pass
-    
-    # Order by date (newest first)
-    query = query.order_by(models.BlogPost.date_time.desc())
-    
-    # Make query distinct to avoid duplicates from the join
-    query = query.distinct()
-    
-    # Get all results without pagination
-    blog_posts = query.all()
-    
-    # For each post, get the translation in the requested language or default to English
-    result = []
-    for post in blog_posts:
-        post_data = {
-            "id": post.id,
-            "category_id": post.category_id,
-            "img_or_video_link": post.img_or_video_link,
-            "date_time": post.date_time,
-            "views": post.views,
-            "published": post.published,
-            "translations": []
-        }
+                # Get translations
+                translations = db.query(models.BlogTranslation).filter(
+                    models.BlogTranslation.post_id == post.id
+                )
+                
+                # If language is specified, prioritize that language
+                if language:
+                    try:
+                        lang = validate_language(language)
+                        translation = translations.filter(models.BlogTranslation.language == lang).first()
+                        if translation:
+                            post_data["translations"].append({
+                                "language": translation.language,
+                                "title": translation.title,
+                                "intro_text": translation.intro_text
+                            })
+                    except ValueError:
+                        pass
+                
+                # If no language specified or translation not found, include all translations
+                if not language or not post_data["translations"]:
+                    for translation in translations.all():
+                        post_data["translations"].append({
+                            "language": translation.language,
+                            "title": translation.title,
+                            "intro_text": translation.intro_text
+                        })
+                
+                # Only add posts that have at least one translation
+                if post_data["translations"]:
+                    result.append(post_data)
+                else:
+                    logger.warning(f"Skipping post ID {post.id} as it has no translations")
+                    
+            except Exception as e:
+                logger.error(f"Error processing translations for post {post.id}: {str(e)}")
+                # Continue with next post instead of failing the entire request
+                continue
         
-        # Get translations
-        translations = db.query(models.BlogTranslation).filter(
-            models.BlogTranslation.post_id == post.id
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in get_blog_posts: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while fetching blog posts"
         )
-        
-        # If language is specified, prioritize that language
-        if language:
-            try:
-                lang = validate_language(language)
-                translation = translations.filter(models.BlogTranslation.language == lang).first()
-                if translation:
-                    post_data["translations"].append({
-                        "language": translation.language,
-                        "title": translation.title,
-                        "intro_text": translation.intro_text
-                    })
-            except ValueError:
-                pass
-        
-        # If no language specified or translation not found, include all translations
-        if not language or not post_data["translations"]:
-            for translation in translations.all():
-                post_data["translations"].append({
-                    "language": translation.language,
-                    "title": translation.title,
-                    "intro_text": translation.intro_text
-                })
-        
-        result.append(post_data)
-    
-    return result
 
 # Get a specific blog post by ID with all translations
 @router.get("/posts/{post_id}", response_model=schemas.BlogPostDetail)
