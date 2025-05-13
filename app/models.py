@@ -195,6 +195,7 @@ class DocumentItem(Base):
     title = Column(String, nullable=False)
     name = Column(String)
     link = Column(String, nullable=False)
+    file_from_server = Column(Boolean, default=True)  # Add this field
     
     category = relationship("DocumentCategory", back_populates="documents")
 

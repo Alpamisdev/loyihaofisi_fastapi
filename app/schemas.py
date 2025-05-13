@@ -231,6 +231,7 @@ class DocumentItemBase(BaseModel):
     title: str
     name: Optional[str] = None
     link: str
+    file_from_server: Optional[bool] = True  # Default to True for backward compatibility
 
 class DocumentItem(DocumentItemBase):
     id: int

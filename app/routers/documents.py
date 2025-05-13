@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -8,6 +8,7 @@ from datetime import datetime
 import httpx
 from urllib.parse import urlparse
 import logging
+from sqlalchemy import or_
 from .. import models, schemas, auth
 from ..database import get_db
 from ..utils.file_utils import save_upload_file, get_file_url
@@ -89,6 +90,7 @@ async def create_document_item(
     link: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     file_url: Optional[str] = Form(None),  # New parameter for already uploaded file URL
+    file_from_server: Optional[bool] = Form(True),  # Add this parameter
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
@@ -109,6 +111,7 @@ async def create_document_item(
     
     # If multiple options are provided, prioritize in this order: file, file_url, link
     final_link = None
+    is_file_from_server = file_from_server  # Default to the provided value
     
     # If file is uploaded, save it and generate a link
     if file:
@@ -132,6 +135,7 @@ async def create_document_item(
         
         # Set the link to the file URL
         final_link = file_url
+        is_file_from_server = True  # File is definitely on server
         
         # Create uploaded file record
         db_file = models.UploadedFile(
@@ -158,6 +162,9 @@ async def create_document_item(
         # Use the provided URL directly
         final_link = file_url
         
+        # Check if URL is from our server
+        is_file_from_server = "/static/" in file_url or file_url.startswith(("static/", "/static/"))
+        
         # Extract filename from URL for name if not provided
         if not name:
             name = os.path.basename(parsed_url.path)
@@ -174,6 +181,7 @@ async def create_document_item(
         
         # Use the provided link directly
         final_link = link
+        is_file_from_server = False  # External link
         
         # Extract filename from URL for name if not provided
         if not name:
@@ -184,7 +192,8 @@ async def create_document_item(
         category_id=category_id,
         title=title,
         name=name,
-        link=final_link
+        link=final_link,
+        file_from_server=is_file_from_server
     )
     db.add(db_document_item)
     db.commit()
@@ -272,6 +281,7 @@ async def update_document_item(
     link: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     file_url: Optional[str] = Form(None),  # New parameter for already uploaded file URL
+    file_from_server: Optional[bool] = Form(None),  # Add this parameter
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
@@ -312,6 +322,7 @@ async def update_document_item(
         
         # Update the link to the file URL
         db_document_item.link = file_url
+        db_document_item.file_from_server = True  # File is definitely on server
         
         # Create uploaded file record
         db_file = models.UploadedFile(
@@ -337,10 +348,19 @@ async def update_document_item(
         
         # Update the link to the provided URL
         db_document_item.link = file_url
+        
+        # Check if URL is from our server
+        is_file_from_server = "/static/" in file_url or file_url.startswith(("static/", "/static/"))
+        db_document_item.file_from_server = is_file_from_server
     
     # Update link if provided and no file is uploaded
     elif link is not None:
         db_document_item.link = link
+        db_document_item.file_from_server = False  # External link
+    
+    # Update file_from_server if explicitly provided
+    if file_from_server is not None:
+        db_document_item.file_from_server = file_from_server
     
     db.commit()
     db.refresh(db_document_item)
@@ -381,3 +401,33 @@ def read_document_items_by_category(category_id: int, db: Session = Depends(get_
     """Get all document items for a specific category without pagination"""
     document_items = db.query(models.DocumentItem).filter(models.DocumentItem.category_id == category_id).all()
     return document_items
+
+# Add a new search endpoint to find documents by name:
+@router.get("/search/", response_model=List[schemas.DocumentItem])
+def search_documents(
+    query: str = Query(..., description="Search query for document name or title"),
+    category_id: Optional[int] = Query(None, description="Filter by category ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Search for documents by name or title.
+    Optionally filter by category.
+    """
+    search_query = f"%{query}%"
+    
+    # Start with base query
+    documents_query = db.query(models.DocumentItem).filter(
+        or_(
+            models.DocumentItem.name.ilike(search_query),
+            models.DocumentItem.title.ilike(search_query)
+        )
+    )
+    
+    # Apply category filter if provided
+    if category_id is not None:
+        documents_query = documents_query.filter(models.DocumentItem.category_id == category_id)
+    
+    # Execute query
+    documents = documents_query.all()
+    
+    return documents
