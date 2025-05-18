@@ -38,15 +38,17 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Add CORS middleware
+# Configure CORS
 app.add_middleware(
-  CORSMiddleware,
-  allow_origins=["http://localhost:3000", "http://localhost:5174", "https://admin-panel-qq-eco-social.netlify.app", "https://qq-ekonomika-social.netlify.app", "https://localhost:5173", "https://localhost:5174"],  # List specific origins instead of "*"
-  allow_credentials=True,
-  allow_methods=["*"],
-  allow_headers=["*"],
-  expose_headers=["Authorization", "Content-Disposition"],
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000","http://localhost:3001","https://loyiha-qq.netlify.app/","https://loyihaofisi.uz","https://loyiha-qq.netlify.app"],  # List specific origins
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*"],
+    expose_headers=["Content-Disposition", "Content-Length", "Content-Type"],
+    max_age=600,
 )
+
 
 # Include routers
 app.include_router(menu.router)
