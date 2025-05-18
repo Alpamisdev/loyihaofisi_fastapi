@@ -34,6 +34,10 @@ async def create_news(
     """
     Create a news post with content in all supported languages (English, Russian, Uzbek, and Karakalpak).
     """
+    # Validate that either image or video is provided
+    if not news.image_url and not news.video_url:
+        raise HTTPException(status_code=400, detail="Either image or video URL must be provided")
+    
     # Set publication date if published and not provided
     if news.published and not news.publication_date:
         news.publication_date = datetime.utcnow()
@@ -41,6 +45,7 @@ async def create_news(
     # Create the news post
     db_news_post = models.NewsPost(
         image_url=news.image_url,
+        video_url=news.video_url,
         published=news.published,
         publication_date=news.publication_date,
         author_id=current_user.id
@@ -156,6 +161,7 @@ async def get_news_posts(
         post_data = {
             "id": post.id,
             "image_url": post.image_url,
+            "video_url": post.video_url,
             "published": post.published,
             "publication_date": post.publication_date,
             "created_at": post.created_at,
@@ -216,7 +222,6 @@ async def get_news_post(
     
     return db_news_post
 
-# Get a specific news post by ID with a specific language
 @router.get("/{post_id}/{language}", response_model=Dict)
 async def get_news_post_by_language(
     post_id: int = Path(..., gt=0),
@@ -253,6 +258,7 @@ async def get_news_post_by_language(
     result = {
         "id": db_news_post.id,
         "image_url": db_news_post.image_url,
+        "video_url": db_news_post.video_url,
         "published": db_news_post.published,
         "publication_date": db_news_post.publication_date,
         "created_at": db_news_post.created_at,
@@ -288,6 +294,13 @@ async def update_news_post(
     # Update post fields
     if news.image_url is not None:
         db_news_post.image_url = news.image_url
+    
+    if news.video_url is not None:
+        db_news_post.video_url = news.video_url
+    
+    # Validate that either image or video is provided
+    if db_news_post.image_url is None and db_news_post.video_url is None:
+        raise HTTPException(status_code=400, detail="Either image or video URL must be provided")
     
     if news.published is not None:
         db_news_post.published = news.published

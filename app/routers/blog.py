@@ -415,11 +415,16 @@ async def create_blog_post(
     db_category = db.query(models.BlogCategory).filter(models.BlogCategory.id == blog.category_id).first()
     if not db_category:
         raise HTTPException(status_code=404, detail=f"Category with ID {blog.category_id} not found")
+    
+    # Validate that either image or video is provided
+    if not blog.img_or_video_link and not blog.video_url:
+        raise HTTPException(status_code=400, detail="Either image or video URL must be provided")
         
     # Create the blog post
     db_blog_post = models.BlogPost(
         category_id=blog.category_id,
         img_or_video_link=blog.img_or_video_link,
+        video_url=blog.video_url,
         published=blog.published,
         date_time=datetime.utcnow()
     )
@@ -558,6 +563,7 @@ async def get_blog_posts(
                     "id": post.id,
                     "category_id": post.category_id,
                     "img_or_video_link": post.img_or_video_link,
+                    "video_url": post.video_url,  # Add the video_url field
                     "date_time": post.date_time or datetime.utcnow(),  # Provide default if None
                     "views": post.views or 0,  # Provide default if None
                     "published": post.published if post.published is not None else True,  # Provide default if None
@@ -700,6 +706,7 @@ async def get_blog_post_by_language(
         "id": db_blog_post.id,
         "category_id": db_blog_post.category_id,
         "img_or_video_link": db_blog_post.img_or_video_link,
+        "video_url": db_blog_post.video_url,
         "date_time": db_blog_post.date_time,
         "views": db_blog_post.views,
         "published": db_blog_post.published,
@@ -740,6 +747,13 @@ async def update_blog_post(
     
     if blog.img_or_video_link is not None:
         db_blog_post.img_or_video_link = blog.img_or_video_link
+    
+    if blog.video_url is not None:
+        db_blog_post.video_url = blog.video_url
+    
+    # Validate that either image or video is provided
+    if db_blog_post.img_or_video_link is None and db_blog_post.video_url is None:
+        raise HTTPException(status_code=400, detail="Either image or video URL must be provided")
     
     if blog.published is not None:
         db_blog_post.published = blog.published
@@ -849,6 +863,7 @@ async def read_blog_posts_by_category(
             "id": post.id,
             "category_id": post.category_id,
             "img_or_video_link": post.img_or_video_link,
+            "video_url": post.video_url,
             "date_time": post.date_time,
             "views": post.views,
             "published": post.published,

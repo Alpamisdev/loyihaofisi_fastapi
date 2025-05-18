@@ -101,7 +101,8 @@ class BlogPost(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     category_id = Column(Integer, ForeignKey("blog_categories.id"))
-    img_or_video_link = Column(String)
+    img_or_video_link = Column(String)  # Keep for backward compatibility
+    video_url = Column(String, nullable=True)  # New field for video URL
     date_time = Column(DateTime, default=func.now())
     views = Column(Integer, default=0)
     published = Column(Boolean, default=True, index=True)
@@ -268,6 +269,7 @@ class NewsPost(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     image_url = Column(String)
+    video_url = Column(String, nullable=True)  # New field for video URL
     published = Column(Boolean, default=False, index=True)
     publication_date = Column(DateTime, index=True)
     created_at = Column(DateTime, default=func.now())

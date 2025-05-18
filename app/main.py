@@ -15,7 +15,7 @@ load_dotenv()
 
 from . import models, schemas, auth
 from .database import engine, get_db
-from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads, token, news
+from .routers import menu, blog, staff, feedback, documents, about_company, contacts, social_networks, year_name, menu_links, uploads, token, news, debug
 from .config import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 
 # Configure logging
@@ -38,17 +38,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Configure CORS
+# Add CORS middleware
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000","http://localhost:3001","https://loyiha-qq.netlify.app/","https://loyihaofisi.uz","https://loyiha-qq.netlify.app"],  # List specific origins
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition", "Content-Length", "Content-Type"],
-    max_age=600,
+  CORSMiddleware,
+  allow_origins=["http://localhost:3000", "http://localhost:5174", "https://admin-panel-qq-eco-social.netlify.app", "https://qq-ekonomika-social.netlify.app", "https://localhost:5173", "https://localhost:5174"],  # List specific origins instead of "*"
+  allow_credentials=True,
+  allow_methods=["*"],
+  allow_headers=["*"],
+  expose_headers=["Authorization", "Content-Disposition"],
 )
-
 
 # Include routers
 app.include_router(menu.router)
@@ -64,6 +62,7 @@ app.include_router(menu_links.router)
 app.include_router(uploads.router)
 app.include_router(token.router)  # Add the token router for refresh token operations
 app.include_router(news.router)   # Add the news router for multilingual blog
+app.include_router(debug.router)
 
 # Define supported languages
 class SupportedLanguages(str, Enum):
