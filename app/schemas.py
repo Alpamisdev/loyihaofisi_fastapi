@@ -110,6 +110,7 @@ class BlogItemBase(BaseModel):
     img_or_video_link: Optional[str] = None
     intro_text: Optional[str] = None
     text: Optional[str] = None
+    is_img: Optional[bool] = False  # New field
 
 class BlogItem(BlogItemBase):
     id: int
@@ -140,9 +141,9 @@ class BlogTranslation(BlogTranslationBase):
 
 class BlogPostBase(BaseModel):
     category_id: int
-    img_or_video_link: Optional[str] = None  # Keep for backward compatibility
-    video_url: Optional[str] = None  # New field for video URL
+    img_or_video_link: Optional[str] = None
     published: bool = True
+    is_img: Optional[bool] = False  # New field
 
 class BlogPostCreate(BlogPostBase):
     translations: List[BlogTranslationCreate]
@@ -176,10 +177,10 @@ class BlogPostSummary(BaseModel):
     id: int
     category_id: int
     img_or_video_link: Optional[str] = None
-    video_url: Optional[str] = None
     date_time: datetime
     views: int
     published: bool
+    is_img: Optional[bool] = False  # New field
     translations: List[BlogTranslationSummary] = []
     
     class Config:
@@ -195,26 +196,19 @@ class MultilingualBlogContent(BaseModel):
 class MultilingualBlogCreate(BaseModel):
     category_id: int
     img_or_video_link: Optional[str] = None
-    video_url: Optional[str] = None
     published: bool = True
+    is_img: Optional[bool] = False  # New field
     en: MultilingualBlogContent
     ru: MultilingualBlogContent
     uz: MultilingualBlogContent
     kk: MultilingualBlogContent
-    
-    @validator('img_or_video_link', 'video_url')
-    def validate_media(cls, v, values):
-        # Check if at least one of img_or_video_link or video_url is provided
-        if 'img_or_video_link' in values and values['img_or_video_link'] is None and v is None:
-            raise ValueError('Either image or video URL must be provided')
-        return v
 
 # New schema for multilingual blog update
 class MultilingualBlogUpdate(BaseModel):
     category_id: Optional[int] = None
     img_or_video_link: Optional[str] = None
-    video_url: Optional[str] = None
     published: Optional[bool] = None
+    is_img: Optional[bool] = None  # New field
     en: Optional[MultilingualBlogContent] = None
     ru: Optional[MultilingualBlogContent] = None
     uz: Optional[MultilingualBlogContent] = None
@@ -242,10 +236,13 @@ class DocumentItemBase(BaseModel):
     title: str
     name: Optional[str] = None
     link: str
-    file_from_server: Optional[bool] = True  # Default to True for backward compatibility
+    is_from_server: Optional[bool] = False
+    status: Optional[str] = "active"
 
 class DocumentItem(DocumentItemBase):
     id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
@@ -418,9 +415,9 @@ class NewsTranslation(NewsTranslationBase):
 # News Post Schema
 class NewsPostBase(BaseModel):
     image_url: Optional[str] = None
-    video_url: Optional[str] = None  # New field for video URL
     published: bool = False
     publication_date: Optional[datetime] = None
+    is_img: Optional[bool] = False  # New field
 
 class NewsPostCreate(NewsPostBase):
     translations: List[NewsTranslationCreate]
@@ -455,12 +452,12 @@ class TranslationSummary(BaseModel):
 class NewsPostSummary(BaseModel):
     id: int
     image_url: Optional[str] = None
-    video_url: Optional[str] = None
     published: bool
     publication_date: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     views: int
+    is_img: Optional[bool] = False  # New field
     translations: List[TranslationSummary] = []
     
     class Config:
@@ -475,9 +472,9 @@ class MultilingualNewsContent(BaseModel):
 # New schema for multilingual news creation
 class MultilingualNewsCreate(BaseModel):
     image_url: Optional[str] = None
-    video_url: Optional[str] = None
     published: bool = False
     publication_date: Optional[datetime] = None
+    is_img: Optional[bool] = False  # New field
     en: MultilingualNewsContent
     ru: MultilingualNewsContent
     uz: MultilingualNewsContent
@@ -488,20 +485,13 @@ class MultilingualNewsCreate(BaseModel):
         if values.get('published', False) and not v:
             return datetime.utcnow()
         return v
-    
-    @validator('image_url', 'video_url')
-    def validate_media(cls, v, values):
-        # Check if at least one of image_url or video_url is provided
-        if 'image_url' in values and values['image_url'] is None and v is None:
-            raise ValueError('Either image or video URL must be provided')
-        return v
 
 # New schema for multilingual news update
 class MultilingualNewsUpdate(BaseModel):
     image_url: Optional[str] = None
-    video_url: Optional[str] = None
     published: Optional[bool] = None
     publication_date: Optional[datetime] = None
+    is_img: Optional[bool] = None  # New field
     en: Optional[MultilingualNewsContent] = None
     ru: Optional[MultilingualNewsContent] = None
     uz: Optional[MultilingualNewsContent] = None
