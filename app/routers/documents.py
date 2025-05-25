@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -8,7 +8,21 @@ from datetime import datetime
 import httpx
 from urllib.parse import urlparse
 import logging
-from sqlalchemy import or_
+from sqlalchemy import or_, and_, func
+import logging
+import os
+from datetime import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 from .. import models, schemas, auth
 from ..database import get_db
 from ..utils.file_utils import save_upload_file, get_file_url
@@ -88,9 +102,9 @@ async def create_document_item(
     title: str = Form(...),
     name: Optional[str] = Form(None),
     link: Optional[str] = Form(None),
+    status: Optional[str] = Form("active"),
     file: Optional[UploadFile] = File(None),
-    file_url: Optional[str] = Form(None),  # New parameter for already uploaded file URL
-    file_from_server: Optional[bool] = Form(True),  # Add this parameter
+    file_url: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
@@ -111,7 +125,7 @@ async def create_document_item(
     
     # If multiple options are provided, prioritize in this order: file, file_url, link
     final_link = None
-    is_file_from_server = file_from_server  # Default to the provided value
+    is_from_server = False
     
     # If file is uploaded, save it and generate a link
     if file:
@@ -135,7 +149,7 @@ async def create_document_item(
         
         # Set the link to the file URL
         final_link = file_url
-        is_file_from_server = True  # File is definitely on server
+        is_from_server = True
         
         # Create uploaded file record
         db_file = models.UploadedFile(
@@ -162,8 +176,8 @@ async def create_document_item(
         # Use the provided URL directly
         final_link = file_url
         
-        # Check if URL is from our server
-        is_file_from_server = "/static/" in file_url or file_url.startswith(("static/", "/static/"))
+        # Check if it's a server file
+        is_from_server = "/static/" in file_url or file_url.startswith("static/")
         
         # Extract filename from URL for name if not provided
         if not name:
@@ -181,7 +195,9 @@ async def create_document_item(
         
         # Use the provided link directly
         final_link = link
-        is_file_from_server = False  # External link
+        
+        # Check if it's a server file
+        is_from_server = "/static/" in link or link.startswith("static/")
         
         # Extract filename from URL for name if not provided
         if not name:
@@ -193,7 +209,10 @@ async def create_document_item(
         title=title,
         name=name,
         link=final_link,
-        file_from_server=is_file_from_server
+        is_from_server=is_from_server,
+        status=status,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
     )
     db.add(db_document_item)
     db.commit()
@@ -202,10 +221,78 @@ async def create_document_item(
     return db_document_item
 
 @router.get("/items/", response_model=List[schemas.DocumentItem])
-def read_document_items(db: Session = Depends(get_db)):
-    """Get all document items without pagination"""
-    document_items = db.query(models.DocumentItem).all()
-    return document_items
+def read_document_items(
+    db: Session = Depends(get_db),
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+    category_id: Optional[int] = None,
+    is_from_server: Optional[bool] = None,
+    status: Optional[str] = None
+):
+    """
+    Get document items with optional filtering and search.
+    
+    - **skip**: Number of items to skip (pagination)
+    - **limit**: Maximum number of items to return (pagination)
+    - **search**: Search term for document title or name
+    - **category_id**: Filter by category ID
+    - **is_from_server**: Filter by whether the document is stored on the server
+    - **status**: Filter by document status (e.g., 'active', 'archived')
+    """
+    try:
+        # Start building the query
+        query = db.query(models.DocumentItem)
+        
+        # Apply filters if provided
+        if category_id is not None:
+            query = query.filter(models.DocumentItem.category_id == category_id)
+        
+        if is_from_server is not None:
+            query = query.filter(models.DocumentItem.is_from_server == is_from_server)
+            
+        if status is not None:
+            query = query.filter(models.DocumentItem.status == status)
+        
+        # Apply search if provided
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    models.DocumentItem.title.ilike(search_term),
+                    models.DocumentItem.name.ilike(search_term)
+                )
+            )
+        
+        # Get total count for pagination info
+        total_count = query.count()
+        
+        # Apply pagination
+        query = query.order_by(models.DocumentItem.created_at.desc())
+        query = query.offset(skip).limit(limit)
+        
+        # Execute query
+        document_items = query.all()
+        
+        # Add pagination headers
+        # Note: In a real implementation, you'd need to modify the response to include these headers
+        pagination_info = {
+            "total": total_count,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total_count
+        }
+        
+        logger.info(f"Retrieved {len(document_items)} documents with filters: category_id={category_id}, is_from_server={is_from_server}, status={status}, search={search}")
+        
+        return document_items
+    
+    except Exception as e:
+        logger.error(f"Error retrieving documents: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while retrieving documents: {str(e)}"
+        )
 
 @router.get("/items/{document_item_id}", response_model=schemas.DocumentItem)
 def read_document_item(document_item_id: int, db: Session = Depends(get_db)):
@@ -225,8 +312,7 @@ async def download_document(document_item_id: int, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Document has no associated file or link")
     
     # Check if the document is a local file
-    if db_document_item.link and (db_document_item.link.startswith(("/static/", "static/")) or 
-                                  "/static/" in db_document_item.link):
+    if db_document_item.is_from_server:
         # Convert to local file path
         file_path = db_document_item.link
         if file_path.startswith("/static/"):
@@ -267,6 +353,8 @@ async def download_document(document_item_id: int, db: Session = Depends(get_db)
             "title": db_document_item.title,
             "name": db_document_item.name,
             "is_external": True,
+            "is_from_server": db_document_item.is_from_server,
+            "status": db_document_item.status,
             "url": db_document_item.link,
             "message": "This is an external document. Use the URL to access it."
         }
@@ -279,9 +367,9 @@ async def update_document_item(
     title: Optional[str] = Form(None),
     name: Optional[str] = Form(None),
     link: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
-    file_url: Optional[str] = Form(None),  # New parameter for already uploaded file URL
-    file_from_server: Optional[bool] = Form(None),  # Add this parameter
+    file_url: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
@@ -303,6 +391,10 @@ async def update_document_item(
     # Update name if provided
     if name is not None:
         db_document_item.name = name
+        
+    # Update status if provided
+    if status is not None:
+        db_document_item.status = status
     
     # If file is uploaded, save it and update the link
     if file:
@@ -322,7 +414,7 @@ async def update_document_item(
         
         # Update the link to the file URL
         db_document_item.link = file_url
-        db_document_item.file_from_server = True  # File is definitely on server
+        db_document_item.is_from_server = True
         
         # Create uploaded file record
         db_file = models.UploadedFile(
@@ -348,19 +440,15 @@ async def update_document_item(
         
         # Update the link to the provided URL
         db_document_item.link = file_url
-        
-        # Check if URL is from our server
-        is_file_from_server = "/static/" in file_url or file_url.startswith(("static/", "/static/"))
-        db_document_item.file_from_server = is_file_from_server
+        db_document_item.is_from_server = "/static/" in file_url or file_url.startswith("static/")
     
     # Update link if provided and no file is uploaded
     elif link is not None:
         db_document_item.link = link
-        db_document_item.file_from_server = False  # External link
+        db_document_item.is_from_server = "/static/" in link or link.startswith("static/")
     
-    # Update file_from_server if explicitly provided
-    if file_from_server is not None:
-        db_document_item.file_from_server = file_from_server
+    # Update the updated_at timestamp
+    db_document_item.updated_at = datetime.utcnow()
     
     db.commit()
     db.refresh(db_document_item)
@@ -402,32 +490,67 @@ def read_document_items_by_category(category_id: int, db: Session = Depends(get_
     document_items = db.query(models.DocumentItem).filter(models.DocumentItem.category_id == category_id).all()
     return document_items
 
-# Add a new search endpoint to find documents by name:
 @router.get("/search/", response_model=List[schemas.DocumentItem])
 def search_documents(
-    query: str = Query(..., description="Search query for document name or title"),
-    category_id: Optional[int] = Query(None, description="Filter by category ID"),
+    q: str,
+    category_id: Optional[int] = None,
+    is_from_server: Optional[bool] = None,
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 20,
     db: Session = Depends(get_db)
 ):
     """
-    Search for documents by name or title.
-    Optionally filter by category.
+    Search for documents by title or name with additional filtering options.
+    
+    - **q**: Search query string
+    - **category_id**: Filter by category ID
+    - **is_from_server**: Filter by whether the document is stored on the server
+    - **status**: Filter by document status
+    - **skip**: Number of items to skip (pagination)
+    - **limit**: Maximum number of items to return (pagination)
     """
-    search_query = f"%{query}%"
-    
-    # Start with base query
-    documents_query = db.query(models.DocumentItem).filter(
-        or_(
-            models.DocumentItem.name.ilike(search_query),
-            models.DocumentItem.title.ilike(search_query)
+    try:
+        # Start with the search condition
+        search_term = f"%{q}%"
+        search_condition = or_(
+            models.DocumentItem.title.ilike(search_term),
+            models.DocumentItem.name.ilike(search_term)
         )
-    )
+        
+        # Build filter conditions
+        filter_conditions = []
+        
+        if category_id is not None:
+            filter_conditions.append(models.DocumentItem.category_id == category_id)
+        
+        if is_from_server is not None:
+            filter_conditions.append(models.DocumentItem.is_from_server == is_from_server)
+            
+        if status is not None:
+            filter_conditions.append(models.DocumentItem.status == status)
+        
+        # Combine search and filter conditions
+        if filter_conditions:
+            query_condition = and_(search_condition, *filter_conditions)
+        else:
+            query_condition = search_condition
+        
+        # Execute the query with pagination
+        documents = db.query(models.DocumentItem).filter(query_condition).order_by(
+            models.DocumentItem.created_at.desc()
+        ).offset(skip).limit(limit).all()
+        
+        # Get total count for pagination info
+        total_count = db.query(models.DocumentItem).filter(query_condition).count()
+        
+        logger.info(f"Search query '{q}' returned {len(documents)} results with filters: category_id={category_id}, is_from_server={is_from_server}, status={status}")
+        
+        return documents
     
-    # Apply category filter if provided
-    if category_id is not None:
-        documents_query = documents_query.filter(models.DocumentItem.category_id == category_id)
-    
-    # Execute query
-    documents = documents_query.all()
-    
-    return documents
+    except Exception as e:
+        logger.error(f"Error searching documents: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while searching documents: {str(e)}"
+        )
