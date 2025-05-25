@@ -142,6 +142,7 @@ class BlogTranslation(BlogTranslationBase):
 class BlogPostBase(BaseModel):
     category_id: int
     img_or_video_link: Optional[str] = None
+    video_url: Optional[str] = None  # New field for video URLs
     published: bool = True
     is_img: Optional[bool] = False  # New field
 
@@ -177,6 +178,7 @@ class BlogPostSummary(BaseModel):
     id: int
     category_id: int
     img_or_video_link: Optional[str] = None
+    video_url: Optional[str] = None  # New field for video URLs
     date_time: datetime
     views: int
     published: bool
@@ -196,6 +198,7 @@ class MultilingualBlogContent(BaseModel):
 class MultilingualBlogCreate(BaseModel):
     category_id: int
     img_or_video_link: Optional[str] = None
+    video_url: Optional[str] = None  # New field for video URLs
     published: bool = True
     is_img: Optional[bool] = False  # New field
     en: MultilingualBlogContent
@@ -207,6 +210,7 @@ class MultilingualBlogCreate(BaseModel):
 class MultilingualBlogUpdate(BaseModel):
     category_id: Optional[int] = None
     img_or_video_link: Optional[str] = None
+    video_url: Optional[str] = None  # New field for video URLs
     published: Optional[bool] = None
     is_img: Optional[bool] = None  # New field
     en: Optional[MultilingualBlogContent] = None
@@ -415,6 +419,7 @@ class NewsTranslation(NewsTranslationBase):
 # News Post Schema
 class NewsPostBase(BaseModel):
     image_url: Optional[str] = None
+    video_url: Optional[str] = None  # New field for video URLs
     published: bool = False
     publication_date: Optional[datetime] = None
     is_img: Optional[bool] = False  # New field
@@ -452,6 +457,7 @@ class TranslationSummary(BaseModel):
 class NewsPostSummary(BaseModel):
     id: int
     image_url: Optional[str] = None
+    video_url: Optional[str] = None  # New field for video URLs
     published: bool
     publication_date: Optional[datetime] = None
     created_at: datetime
@@ -472,6 +478,7 @@ class MultilingualNewsContent(BaseModel):
 # New schema for multilingual news creation
 class MultilingualNewsCreate(BaseModel):
     image_url: Optional[str] = None
+    video_url: Optional[str] = None  # New field for video URLs
     published: bool = False
     publication_date: Optional[datetime] = None
     is_img: Optional[bool] = False  # New field
@@ -489,6 +496,7 @@ class MultilingualNewsCreate(BaseModel):
 # New schema for multilingual news update
 class MultilingualNewsUpdate(BaseModel):
     image_url: Optional[str] = None
+    video_url: Optional[str] = None  # New field for video URLs
     published: Optional[bool] = None
     publication_date: Optional[datetime] = None
     is_img: Optional[bool] = None  # New field

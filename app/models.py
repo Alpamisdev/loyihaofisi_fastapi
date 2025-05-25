@@ -102,10 +102,11 @@ class BlogPost(Base):
     id = Column(Integer, primary_key=True, index=True)
     category_id = Column(Integer, ForeignKey("blog_categories.id"))
     img_or_video_link = Column(String)
+    video_url = Column(String, nullable=True)  # New column for video URLs
     date_time = Column(DateTime, default=func.now())
     views = Column(Integer, default=0)
     published = Column(Boolean, default=True, index=True)
-    is_img = Column(Boolean, default=False, index=True)  # New column
+    is_img = Column(Boolean, default=False, index=True)
     
     # Relationships
     category = relationship("BlogCategory", back_populates="blog_posts")
@@ -143,7 +144,7 @@ class BlogItem(Base):
     views = Column(Integer, default=0)
     text = Column(Text)
     intro_text = Column(Text)
-    is_img = Column(Boolean, default=False, index=True)  # New column
+    is_img = Column(Boolean, default=False, index=True)
     
     category = relationship("BlogCategory", back_populates="blog_items")
 
@@ -273,13 +274,14 @@ class NewsPost(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     image_url = Column(String)
+    video_url = Column(String, nullable=True)  # New column for video URLs
     published = Column(Boolean, default=False, index=True)
     publication_date = Column(DateTime, index=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     author_id = Column(Integer, ForeignKey("admin_users.id"))
     views = Column(Integer, default=0)
-    is_img = Column(Boolean, default=False, index=True)  # New column
+    is_img = Column(Boolean, default=False, index=True)
     
     # Relationships
     author = relationship("AdminUser", back_populates="news_items")

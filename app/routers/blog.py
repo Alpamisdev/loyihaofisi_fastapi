@@ -415,17 +415,14 @@ async def create_blog_post(
     db_category = db.query(models.BlogCategory).filter(models.BlogCategory.id == blog.category_id).first()
     if not db_category:
         raise HTTPException(status_code=404, detail=f"Category with ID {blog.category_id} not found")
-    
-    # Validate that either image or video is provided
-    if not blog.img_or_video_link and not blog.video_url:
-        raise HTTPException(status_code=400, detail="Either image or video URL must be provided")
         
     # Create the blog post
     db_blog_post = models.BlogPost(
         category_id=blog.category_id,
         img_or_video_link=blog.img_or_video_link,
-        video_url=blog.video_url,
+        video_url=blog.video_url,  # Add the video_url field
         published=blog.published,
+        is_img=blog.is_img if blog.is_img is not None else False,
         date_time=datetime.utcnow()
     )
     db.add(db_blog_post)
@@ -563,10 +560,11 @@ async def get_blog_posts(
                     "id": post.id,
                     "category_id": post.category_id,
                     "img_or_video_link": post.img_or_video_link,
-                    "video_url": post.video_url,  # Add the video_url field
+                    "video_url": getattr(post, "video_url", None),  # Safely get video_url with a default
                     "date_time": post.date_time or datetime.utcnow(),  # Provide default if None
                     "views": post.views or 0,  # Provide default if None
                     "published": post.published if post.published is not None else True,  # Provide default if None
+                    "is_img": post.is_img if post.is_img is not None else False,  # Provide default if None
                     "translations": []
                 }
                 
@@ -706,10 +704,11 @@ async def get_blog_post_by_language(
         "id": db_blog_post.id,
         "category_id": db_blog_post.category_id,
         "img_or_video_link": db_blog_post.img_or_video_link,
-        "video_url": db_blog_post.video_url,
+        "video_url": getattr(db_blog_post, "video_url", None),  # Add video_url field
         "date_time": db_blog_post.date_time,
         "views": db_blog_post.views,
         "published": db_blog_post.published,
+        "is_img": getattr(db_blog_post, "is_img", False),  # Safely get is_img
         "language": language,
         "title": translation.title,
         "intro_text": translation.intro_text,
@@ -748,15 +747,14 @@ async def update_blog_post(
     if blog.img_or_video_link is not None:
         db_blog_post.img_or_video_link = blog.img_or_video_link
     
-    if blog.video_url is not None:
+    if blog.video_url is not None:  # Add handling for video_url
         db_blog_post.video_url = blog.video_url
-    
-    # Validate that either image or video is provided
-    if db_blog_post.img_or_video_link is None and db_blog_post.video_url is None:
-        raise HTTPException(status_code=400, detail="Either image or video URL must be provided")
     
     if blog.published is not None:
         db_blog_post.published = blog.published
+    
+    if blog.is_img is not None:
+        db_blog_post.is_img = blog.is_img
     
     # Update translations
     languages = ["en", "ru", "uz", "kk"]
@@ -863,10 +861,11 @@ async def read_blog_posts_by_category(
             "id": post.id,
             "category_id": post.category_id,
             "img_or_video_link": post.img_or_video_link,
-            "video_url": post.video_url,
+            "video_url": getattr(post, "video_url", None),  # Add video_url field
             "date_time": post.date_time,
             "views": post.views,
             "published": post.published,
+            "is_img": getattr(post, "is_img", False),  # Safely get is_img
             "translations": []
         }
         
