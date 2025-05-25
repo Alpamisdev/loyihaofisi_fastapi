@@ -9,6 +9,7 @@ import logging
 from datetime import timedelta
 from enum import Enum
 from dotenv import load_dotenv
+from app.routers import analytical_documents
 
 # Load environment variables at the start
 load_dotenv()
@@ -65,6 +66,7 @@ app.include_router(uploads.router)
 app.include_router(token.router)  # Add the token router for refresh token operations
 app.include_router(news.router)   # Add the news router for multilingual blog
 app.include_router(debug.router)
+app.include_router(analytical_documents.router)
 
 # Define supported languages
 class SupportedLanguages(str, Enum):

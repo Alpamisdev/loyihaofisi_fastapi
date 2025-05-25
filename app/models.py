@@ -205,6 +205,31 @@ class DocumentItem(Base):
     
     category = relationship("DocumentCategory", back_populates="documents")
 
+# Analytical Documents - New models
+class AnalyticalDocumentCategory(Base):
+    __tablename__ = "analytical_documents_categories"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    
+    documents = relationship("AnalyticalDocumentItem", back_populates="category")
+
+class AnalyticalDocumentItem(Base):
+    __tablename__ = "analytical_documents_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    category_id = Column(Integer, ForeignKey("analytical_documents_categories.id"))
+    title = Column(String, nullable=False)
+    name = Column(String)
+    link = Column(String, nullable=False)
+    is_from_server = Column(Boolean, default=False, index=True)
+    status = Column(String, default="active", index=True)
+    document_type = Column(String, nullable=True)  # Additional column for analytical documents
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    category = relationship("AnalyticalDocumentCategory", back_populates="documents")
+
 # Menu Links
 class MenuLink(Base):
     __tablename__ = "menu_links"

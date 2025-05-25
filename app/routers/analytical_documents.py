@@ -1,0 +1,589 @@
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query, Path
+from fastapi.responses import FileResponse, RedirectResponse
+from sqlalchemy.orm import Session
+from typing import List, Optional
+import os
+import shutil
+from datetime import datetime
+import httpx
+from urllib.parse import urlparse
+import logging
+from sqlalchemy import or_, and_, func
+import logging
+import os
+from datetime import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+from .. import models, schemas, auth
+from ..database import get_db
+from ..utils.file_utils import save_upload_file, get_file_url
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/analytical-documents",
+    tags=["analytical documents"],
+    responses={404: {"description": "Not found"}},
+)
+
+# Analytical Document Categories
+@router.post("/categories/", response_model=schemas.AnalyticalDocumentCategory)
+def create_analytical_document_category(
+    category: schemas.AnalyticalDocumentCategoryBase, 
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    db_category = models.AnalyticalDocumentCategory(**category.dict())
+    db.add(db_category)
+    db.commit()
+    db.refresh(db_category)
+    return db_category
+
+@router.get("/categories/", response_model=List[schemas.AnalyticalDocumentCategory])
+def read_analytical_document_categories(db: Session = Depends(get_db)):
+    """Get all analytical document categories without pagination"""
+    categories = db.query(models.AnalyticalDocumentCategory).all()
+    return categories
+
+@router.get("/categories/{category_id}", response_model=schemas.AnalyticalDocumentCategory)
+def read_analytical_document_category(category_id: int, db: Session = Depends(get_db)):
+    db_category = db.query(models.AnalyticalDocumentCategory).filter(models.AnalyticalDocumentCategory.id == category_id).first()
+    if db_category is None:
+        raise HTTPException(status_code=404, detail="Analytical document category not found")
+    return db_category
+
+@router.put("/categories/{category_id}", response_model=schemas.AnalyticalDocumentCategory)
+def update_analytical_document_category(
+    category_id: int, 
+    category: schemas.AnalyticalDocumentCategoryBase, 
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    db_category = db.query(models.AnalyticalDocumentCategory).filter(models.AnalyticalDocumentCategory.id == category_id).first()
+    if db_category is None:
+        raise HTTPException(status_code=404, detail="Analytical document category not found")
+    
+    for key, value in category.dict().items():
+        setattr(db_category, key, value)
+    
+    db.commit()
+    db.refresh(db_category)
+    return db_category
+
+@router.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_analytical_document_category(
+    category_id: int, 
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    db_category = db.query(models.AnalyticalDocumentCategory).filter(models.AnalyticalDocumentCategory.id == category_id).first()
+    if db_category is None:
+        raise HTTPException(status_code=404, detail="Analytical document category not found")
+    
+    db.delete(db_category)
+    db.commit()
+    return None
+
+# Analytical Document Items
+@router.post("/items/", response_model=schemas.AnalyticalDocumentItem)
+async def create_analytical_document_item(
+    background_tasks: BackgroundTasks,
+    category_id: int = Form(...),
+    title: str = Form(...),
+    name: Optional[str] = Form(None),
+    link: Optional[str] = Form(None),
+    status: Optional[str] = Form("active"),
+    document_type: Optional[str] = Form(None),  # New field for analytical documents
+    file: Optional[UploadFile] = File(None),
+    file_url: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    """
+    Create an analytical document item. You can provide one of the following:
+    - A link to an external document
+    - Upload a file directly
+    - Provide a URL to an already uploaded file
+    """
+    # Check if category exists
+    db_category = db.query(models.AnalyticalDocumentCategory).filter(models.AnalyticalDocumentCategory.id == category_id).first()
+    if not db_category:
+        raise HTTPException(status_code=404, detail="Analytical document category not found")
+    
+    # Check if at least one of link, file, or file_url is provided
+    if not link and not file and not file_url:
+        raise HTTPException(status_code=400, detail="Either link, file, or file_url must be provided")
+    
+    # If multiple options are provided, prioritize in this order: file, file_url, link
+    final_link = None
+    is_from_server = False
+    
+    # If file is uploaded, save it and generate a link
+    if file:
+        # Create analytical-documents directory if it doesn't exist
+        os.makedirs("static/analytical-documents", exist_ok=True)
+        
+        # Save the file
+        success, error_msg, file_path, file_size, mime_type = await save_upload_file(
+            file, folder="analytical-documents", convert_to_webp=False
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to save file: {error_msg}")
+        
+        # Generate file URL
+        file_url = get_file_url(file_path)
+        
+        # Use the original filename if name is not provided
+        if not name:
+            name = file.filename
+        
+        # Set the link to the file URL
+        final_link = file_url
+        is_from_server = True
+        
+        # Create uploaded file record
+        db_file = models.UploadedFile(
+            filename=os.path.basename(file_path),
+            original_filename=file.filename,
+            file_path=file_path,
+            file_url=file_url,
+            file_size=file_size,
+            mime_type=mime_type,
+            uploaded_by=current_user.id
+        )
+        db.add(db_file)
+    
+    # If file_url is provided (URL to already uploaded file)
+    elif file_url:
+        # Validate the URL
+        try:
+            parsed_url = urlparse(file_url)
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise HTTPException(status_code=400, detail="Invalid file URL format")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid file URL")
+        
+        # Use the provided URL directly
+        final_link = file_url
+        
+        # Check if it's a server file
+        is_from_server = "/static/" in file_url or file_url.startswith("static/")
+        
+        # Extract filename from URL for name if not provided
+        if not name:
+            name = os.path.basename(parsed_url.path)
+    
+    # If link is provided (external link)
+    elif link:
+        # Validate the URL
+        try:
+            parsed_url = urlparse(link)
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise HTTPException(status_code=400, detail="Invalid link format")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid link")
+        
+        # Use the provided link directly
+        final_link = link
+        
+        # Check if it's a server file
+        is_from_server = "/static/" in link or link.startswith("static/")
+        
+        # Extract filename from URL for name if not provided
+        if not name:
+            name = os.path.basename(parsed_url.path)
+    
+    # Create analytical document item
+    db_document_item = models.AnalyticalDocumentItem(
+        category_id=category_id,
+        title=title,
+        name=name,
+        link=final_link,
+        is_from_server=is_from_server,
+        status=status,
+        document_type=document_type,  # Set the document_type field
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+    db.add(db_document_item)
+    db.commit()
+    db.refresh(db_document_item)
+    
+    return db_document_item
+
+@router.get("/items/", response_model=List[schemas.AnalyticalDocumentItem])
+def read_analytical_document_items(
+    db: Session = Depends(get_db),
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+    category_id: Optional[int] = None,
+    is_from_server: Optional[bool] = None,
+    status: Optional[str] = None,
+    document_type: Optional[str] = None  # New query parameter for document_type
+):
+    """
+    Get analytical document items with optional filtering and search.
+    
+    - **skip**: Number of items to skip (pagination)
+    - **limit**: Maximum number of items to return (pagination)
+    - **search**: Search term for document title or name
+    - **category_id**: Filter by category ID
+    - **is_from_server**: Filter by whether the document is stored on the server
+    - **status**: Filter by document status (e.g., 'active', 'archived')
+    - **document_type**: Filter by document type
+    """
+    try:
+        # Start building the query
+        query = db.query(models.AnalyticalDocumentItem)
+        
+        # Apply filters if provided
+        if category_id is not None:
+            query = query.filter(models.AnalyticalDocumentItem.category_id == category_id)
+        
+        if is_from_server is not None:
+            query = query.filter(models.AnalyticalDocumentItem.is_from_server == is_from_server)
+            
+        if status is not None:
+            query = query.filter(models.AnalyticalDocumentItem.status == status)
+            
+        if document_type is not None:
+            query = query.filter(models.AnalyticalDocumentItem.document_type == document_type)
+        
+        # Apply search if provided
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    models.AnalyticalDocumentItem.title.ilike(search_term),
+                    models.AnalyticalDocumentItem.name.ilike(search_term)
+                )
+            )
+        
+        # Get total count for pagination info
+        total_count = query.count()
+        
+        # Apply pagination
+        query = query.order_by(models.AnalyticalDocumentItem.created_at.desc())
+        query = query.offset(skip).limit(limit)
+        
+        # Execute query
+        document_items = query.all()
+        
+        # Add pagination headers
+        # Note: In a real implementation, you'd need to modify the response to include these headers
+        pagination_info = {
+            "total": total_count,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total_count
+        }
+        
+        logger.info(f"Retrieved {len(document_items)} analytical documents with filters: category_id={category_id}, is_from_server={is_from_server}, status={status}, document_type={document_type}, search={search}")
+        
+        return document_items
+    
+    except Exception as e:
+        logger.error(f"Error retrieving analytical documents: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while retrieving analytical documents: {str(e)}"
+        )
+
+@router.get("/items/{document_item_id}", response_model=schemas.AnalyticalDocumentItem)
+def read_analytical_document_item(document_item_id: int, db: Session = Depends(get_db)):
+    db_document_item = db.query(models.AnalyticalDocumentItem).filter(models.AnalyticalDocumentItem.id == document_item_id).first()
+    if db_document_item is None:
+        raise HTTPException(status_code=404, detail="Analytical document item not found")
+    return db_document_item
+
+@router.get("/download/{document_item_id}")
+async def download_analytical_document(document_item_id: int, db: Session = Depends(get_db)):
+    """Download an analytical document file or return information about external URL"""
+    db_document_item = db.query(models.AnalyticalDocumentItem).filter(models.AnalyticalDocumentItem.id == document_item_id).first()
+    if db_document_item is None:
+        raise HTTPException(status_code=404, detail="Analytical document item not found")
+    
+    if not db_document_item.link:
+        raise HTTPException(status_code=404, detail="Document has no associated file or link")
+    
+    # Check if the document is a local file
+    if db_document_item.is_from_server:
+        # Convert to local file path
+        file_path = db_document_item.link
+        if file_path.startswith("/static/"):
+            file_path = file_path[1:]  # Remove leading slash
+        elif "/static/" in file_path:
+            # Handle full URLs to static files on the same server
+            file_path = file_path.split("/static/")[1]
+            file_path = f"static/{file_path}"
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Document file not found")
+        
+        # Ensure filename has an extension
+        filename = db_document_item.name or os.path.basename(file_path)
+        
+        # If the document name doesn't have an extension, extract it from the file path
+        if '.' not in filename and '.' in file_path:
+            file_extension = os.path.splitext(file_path)[1]  # Get extension with dot
+            if file_extension:
+                # If filename already has extension, use it as is
+                if not filename.endswith(file_extension):
+                    filename = f"{filename}{file_extension}"
+        
+        logger.info(f"Serving file: {file_path} with filename: {filename}")
+        
+        # Return file for download with proper filename including extension
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type="application/octet-stream"
+        )
+    else:
+        # For external links, return the URL instead of redirecting
+        # This avoids CORS issues
+        return {
+            "document_id": db_document_item.id,
+            "title": db_document_item.title,
+            "name": db_document_item.name,
+            "document_type": db_document_item.document_type,
+            "is_external": True,
+            "is_from_server": db_document_item.is_from_server,
+            "status": db_document_item.status,
+            "url": db_document_item.link,
+            "message": "This is an external document. Use the URL to access it."
+        }
+
+@router.put("/items/{document_item_id}", response_model=schemas.AnalyticalDocumentItem)
+async def update_analytical_document_item(
+    document_item_id: int,
+    background_tasks: BackgroundTasks,
+    category_id: Optional[int] = Form(None),
+    title: Optional[str] = Form(None),
+    name: Optional[str] = Form(None),
+    link: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
+    document_type: Optional[str] = Form(None),  # New field for analytical documents
+    file: Optional[UploadFile] = File(None),
+    file_url: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    db_document_item = db.query(models.AnalyticalDocumentItem).filter(models.AnalyticalDocumentItem.id == document_item_id).first()
+    if db_document_item is None:
+        raise HTTPException(status_code=404, detail="Analytical document item not found")
+    
+    # Update category if provided
+    if category_id is not None:
+        db_category = db.query(models.AnalyticalDocumentCategory).filter(models.AnalyticalDocumentCategory.id == category_id).first()
+        if not db_category:
+            raise HTTPException(status_code=404, detail="Analytical document category not found")
+        db_document_item.category_id = category_id
+    
+    # Update title if provided
+    if title is not None:
+        db_document_item.title = title
+    
+    # Update name if provided
+    if name is not None:
+        db_document_item.name = name
+        
+    # Update status if provided
+    if status is not None:
+        db_document_item.status = status
+        
+    # Update document_type if provided
+    if document_type is not None:
+        db_document_item.document_type = document_type
+    
+    # If file is uploaded, save it and update the link
+    if file:
+        # Create analytical-documents directory if it doesn't exist
+        os.makedirs("static/analytical-documents", exist_ok=True)
+        
+        # Save the file
+        success, error_msg, file_path, file_size, mime_type = await save_upload_file(
+            file, folder="analytical-documents", convert_to_webp=False
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to save file: {error_msg}")
+        
+        # Generate file URL
+        file_url = get_file_url(file_path)
+        
+        # Update the link to the file URL
+        db_document_item.link = file_url
+        db_document_item.is_from_server = True
+        
+        # Create uploaded file record
+        db_file = models.UploadedFile(
+            filename=os.path.basename(file_path),
+            original_filename=file.filename,
+            file_path=file_path,
+            file_url=file_url,
+            file_size=file_size,
+            mime_type=mime_type,
+            uploaded_by=current_user.id
+        )
+        db.add(db_file)
+    
+    # If file_url is provided (URL to already uploaded file)
+    elif file_url:
+        # Validate the URL
+        try:
+            parsed_url = urlparse(file_url)
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise HTTPException(status_code=400, detail="Invalid file URL format")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid file URL")
+        
+        # Update the link to the provided URL
+        db_document_item.link = file_url
+        db_document_item.is_from_server = "/static/" in file_url or file_url.startswith("static/")
+    
+    # Update link if provided and no file is uploaded
+    elif link is not None:
+        db_document_item.link = link
+        db_document_item.is_from_server = "/static/" in link or link.startswith("static/")
+    
+    # Update the updated_at timestamp
+    db_document_item.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(db_document_item)
+    
+    return db_document_item
+
+@router.delete("/items/{document_item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_analytical_document_item(
+    document_item_id: int, 
+    db: Session = Depends(get_db),
+    current_user: models.AdminUser = Depends(auth.get_current_user)
+):
+    db_document_item = db.query(models.AnalyticalDocumentItem).filter(models.AnalyticalDocumentItem.id == document_item_id).first()
+    if db_document_item is None:
+        raise HTTPException(status_code=404, detail="Analytical document item not found")
+    
+    # If the document is a local file, delete it
+    if db_document_item.link and db_document_item.link.startswith(("/static/", "static/")):
+        file_path = db_document_item.link
+        if file_path.startswith("/static/"):
+            file_path = file_path[1:]  # Remove leading slash
+        
+        # Try to delete the file, but don't fail if it doesn't exist
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            # Log the error but continue with database deletion
+            logger.error(f"Error deleting file {file_path}: {str(e)}")
+    
+    db.delete(db_document_item)
+    db.commit()
+    return None
+
+# Get analytical document items by category
+@router.get("/categories/{category_id}/items", response_model=List[schemas.AnalyticalDocumentItem])
+def read_analytical_document_items_by_category(category_id: int, db: Session = Depends(get_db)):
+    """Get all analytical document items for a specific category without pagination"""
+    document_items = db.query(models.AnalyticalDocumentItem).filter(models.AnalyticalDocumentItem.category_id == category_id).all()
+    return document_items
+
+@router.get("/search/", response_model=List[schemas.AnalyticalDocumentItem])
+def search_analytical_documents(
+    q: str,
+    category_id: Optional[int] = None,
+    is_from_server: Optional[bool] = None,
+    status: Optional[str] = None,
+    document_type: Optional[str] = None,  # New query parameter for document_type
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db)
+):
+    """
+    Search for analytical documents by title or name with additional filtering options.
+    
+    - **q**: Search query string
+    - **category_id**: Filter by category ID
+    - **is_from_server**: Filter by whether the document is stored on the server
+    - **status**: Filter by document status
+    - **document_type**: Filter by document type
+    - **skip**: Number of items to skip (pagination)
+    - **limit**: Maximum number of items to return (pagination)
+    """
+    try:
+        # Start with the search condition
+        search_term = f"%{q}%"
+        search_condition = or_(
+            models.AnalyticalDocumentItem.title.ilike(search_term),
+            models.AnalyticalDocumentItem.name.ilike(search_term)
+        )
+        
+        # Build filter conditions
+        filter_conditions = []
+        
+        if category_id is not None:
+            filter_conditions.append(models.AnalyticalDocumentItem.category_id == category_id)
+        
+        if is_from_server is not None:
+            filter_conditions.append(models.AnalyticalDocumentItem.is_from_server == is_from_server)
+            
+        if status is not None:
+            filter_conditions.append(models.AnalyticalDocumentItem.status == status)
+            
+        if document_type is not None:
+            filter_conditions.append(models.AnalyticalDocumentItem.document_type == document_type)
+        
+        # Combine search and filter conditions
+        if filter_conditions:
+            query_condition = and_(search_condition, *filter_conditions)
+        else:
+            query_condition = search_condition
+        
+        # Execute the query with pagination
+        documents = db.query(models.AnalyticalDocumentItem).filter(query_condition).order_by(
+            models.AnalyticalDocumentItem.created_at.desc()
+        ).offset(skip).limit(limit).all()
+        
+        # Get total count for pagination info
+        total_count = db.query(models.AnalyticalDocumentItem).filter(query_condition).count()
+        
+        logger.info(f"Search query '{q}' returned {len(documents)} results with filters: category_id={category_id}, is_from_server={is_from_server}, status={status}, document_type={document_type}")
+        
+        return documents
+    
+    except Exception as e:
+        logger.error(f"Error searching analytical documents: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while searching analytical documents: {str(e)}"
+        )
+
+# Get analytical documents by document type
+@router.get("/by-type/{document_type}", response_model=List[schemas.AnalyticalDocumentItem])
+def read_analytical_documents_by_type(
+    document_type: str = Path(..., description="The document type to filter by"),
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """Get all analytical documents of a specific type"""
+    document_items = db.query(models.AnalyticalDocumentItem).filter(
+        models.AnalyticalDocumentItem.document_type == document_type
+    ).order_by(models.AnalyticalDocumentItem.created_at.desc()).offset(skip).limit(limit).all()
+    
+    return document_items

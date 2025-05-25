@@ -251,6 +251,33 @@ class DocumentItem(DocumentItemBase):
     class Config:
         from_attributes = True
 
+# Analytical Documents Schemas
+class AnalyticalDocumentCategoryBase(BaseModel):
+    name: str
+
+class AnalyticalDocumentCategory(AnalyticalDocumentCategoryBase):
+    id: int
+    
+    class Config:
+        from_attributes = True
+
+class AnalyticalDocumentItemBase(BaseModel):
+    category_id: int
+    title: str
+    name: Optional[str] = None
+    link: str
+    is_from_server: Optional[bool] = False
+    status: Optional[str] = "active"
+    document_type: Optional[str] = None  # Additional field for analytical documents
+
+class AnalyticalDocumentItem(AnalyticalDocumentItemBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
 class MenuLinkBase(BaseModel):
     menu_id: int
     target_type: str
