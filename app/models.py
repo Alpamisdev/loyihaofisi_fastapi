@@ -200,6 +200,7 @@ class DocumentItem(Base):
     link = Column(String, nullable=False)
     is_from_server = Column(Boolean, default=False, index=True)
     status = Column(String, default="active", index=True)
+    published_date = Column(DateTime, nullable=True, index=True)  # New field
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
@@ -225,6 +226,7 @@ class AnalyticalDocumentItem(Base):
     is_from_server = Column(Boolean, default=False, index=True)
     status = Column(String, default="active", index=True)
     document_type = Column(String, nullable=True)  # Additional column for analytical documents
+    published_date = Column(DateTime, nullable=True, index=True)  # New field
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     

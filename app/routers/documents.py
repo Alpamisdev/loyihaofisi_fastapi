@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -103,8 +103,10 @@ async def create_document_item(
     name: Optional[str] = Form(None),
     link: Optional[str] = Form(None),
     status: Optional[str] = Form("active"),
+    published_date: Optional[datetime] = Form(None),  # New field
     file: Optional[UploadFile] = File(None),
     file_url: Optional[str] = Form(None),
+    file_from_server: Optional[bool] = Form(False),
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
@@ -125,7 +127,7 @@ async def create_document_item(
     
     # If multiple options are provided, prioritize in this order: file, file_url, link
     final_link = None
-    is_from_server = False
+    is_from_server_val = file_from_server  # Use the provided parameter
     
     # If file is uploaded, save it and generate a link
     if file:
@@ -141,7 +143,7 @@ async def create_document_item(
             raise HTTPException(status_code=500, detail=f"Failed to save file: {error_msg}")
         
         # Generate file URL
-        file_url = get_file_url(file_path)
+        final_link = get_file_url(file_path)
         
         # Use the original filename if name is not provided
         if not name:
@@ -149,19 +151,19 @@ async def create_document_item(
         
         # Set the link to the file URL
         final_link = file_url
-        is_from_server = True
+        is_from_server_val = True  # Override with True since we're uploading a file
         
         # Create uploaded file record
-        db_file = models.UploadedFile(
+        db_file_record = models.UploadedFile(
             filename=os.path.basename(file_path),
             original_filename=file.filename,
             file_path=file_path,
-            file_url=file_url,
+            file_url=final_link,
             file_size=file_size,
             mime_type=mime_type,
             uploaded_by=current_user.id
         )
-        db.add(db_file)
+        db.add(db_file_record)
     
     # If file_url is provided (URL to already uploaded file)
     elif file_url:
@@ -176,8 +178,9 @@ async def create_document_item(
         # Use the provided URL directly
         final_link = file_url
         
-        # Check if it's a server file
-        is_from_server = "/static/" in file_url or file_url.startswith("static/")
+        # Check if it's a server file if not explicitly specified
+        if file_from_server is None:
+            is_from_server_val = "/static/" in file_url or file_url.startswith("static/")
         
         # Extract filename from URL for name if not provided
         if not name:
@@ -196,8 +199,9 @@ async def create_document_item(
         # Use the provided link directly
         final_link = link
         
-        # Check if it's a server file
-        is_from_server = "/static/" in link or link.startswith("static/")
+        # Check if it's a server file if not explicitly specified
+        if file_from_server is None:
+            is_from_server_val = "/static/" in link or link.startswith("static/")
         
         # Extract filename from URL for name if not provided
         if not name:
@@ -209,8 +213,9 @@ async def create_document_item(
         title=title,
         name=name,
         link=final_link,
-        is_from_server=is_from_server,
+        is_from_server=is_from_server_val,
         status=status,
+        published_date=published_date,  # Save the published_date
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow()
     )
@@ -227,7 +232,7 @@ def read_document_items(
     limit: int = 100,
     search: Optional[str] = None,
     category_id: Optional[int] = None,
-    is_from_server: Optional[bool] = None,
+    file_from_server: Optional[bool] = None,  # Changed from is_from_server
     status: Optional[str] = None
 ):
     """
@@ -237,7 +242,7 @@ def read_document_items(
     - **limit**: Maximum number of items to return (pagination)
     - **search**: Search term for document title or name
     - **category_id**: Filter by category ID
-    - **is_from_server**: Filter by whether the document is stored on the server
+    - **file_from_server**: Filter by whether the document is stored on the server
     - **status**: Filter by document status (e.g., 'active', 'archived')
     """
     try:
@@ -248,8 +253,8 @@ def read_document_items(
         if category_id is not None:
             query = query.filter(models.DocumentItem.category_id == category_id)
         
-        if is_from_server is not None:
-            query = query.filter(models.DocumentItem.is_from_server == is_from_server)
+        if file_from_server is not None:  # Changed from is_from_server
+            query = query.filter(models.DocumentItem.is_from_server == file_from_server)
             
         if status is not None:
             query = query.filter(models.DocumentItem.status == status)
@@ -283,7 +288,7 @@ def read_document_items(
             "has_more": (skip + limit) < total_count
         }
         
-        logger.info(f"Retrieved {len(document_items)} documents with filters: category_id={category_id}, is_from_server={is_from_server}, status={status}, search={search}")
+        logger.info(f"Retrieved {len(document_items)} documents with filters: category_id={category_id}, file_from_server={file_from_server}, status={status}, search={search}")
         
         return document_items
     
@@ -368,8 +373,10 @@ async def update_document_item(
     name: Optional[str] = Form(None),
     link: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
+    published_date: Optional[datetime] = Form(None),  # New field
     file: Optional[UploadFile] = File(None),
     file_url: Optional[str] = Form(None),
+    file_from_server: Optional[bool] = Form(None),
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
@@ -396,6 +403,10 @@ async def update_document_item(
     if status is not None:
         db_document_item.status = status
     
+    # Update published_date if provided
+    if published_date is not None:
+        db_document_item.published_date = published_date
+    
     # If file is uploaded, save it and update the link
     if file:
         # Create documents directory if it doesn't exist
@@ -409,50 +420,45 @@ async def update_document_item(
         if not success:
             raise HTTPException(status_code=500, detail=f"Failed to save file: {error_msg}")
         
-        # Generate file URL
-        file_url = get_file_url(file_path)
+        db_document_item.link = get_file_url(file_path)
+        db_document_item.is_from_server = True # Always true for uploaded files
         
-        # Update the link to the file URL
-        db_document_item.link = file_url
-        db_document_item.is_from_server = True
-        
-        # Create uploaded file record
-        db_file = models.UploadedFile(
+        db_file_record = models.UploadedFile(
             filename=os.path.basename(file_path),
             original_filename=file.filename,
             file_path=file_path,
-            file_url=file_url,
+            file_url=db_document_item.link,
             file_size=file_size,
             mime_type=mime_type,
             uploaded_by=current_user.id
         )
-        db.add(db_file)
-    
-    # If file_url is provided (URL to already uploaded file)
+        db.add(db_file_record)
+
     elif file_url:
-        # Validate the URL
         try:
             parsed_url = urlparse(file_url)
             if not parsed_url.scheme or not parsed_url.netloc:
                 raise HTTPException(status_code=400, detail="Invalid file URL format")
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid file URL")
-        
-        # Update the link to the provided URL
         db_document_item.link = file_url
-        db_document_item.is_from_server = "/static/" in file_url or file_url.startswith("static/")
-    
-    # Update link if provided and no file is uploaded
+        if file_from_server is not None:
+            db_document_item.is_from_server = file_from_server
+        else: # infer if not explicitly set
+            db_document_item.is_from_server = "/static/" in file_url or file_url.startswith("static/")
     elif link is not None:
         db_document_item.link = link
-        db_document_item.is_from_server = "/static/" in link or link.startswith("static/")
-    
-    # Update the updated_at timestamp
+        if file_from_server is not None:
+            db_document_item.is_from_server = file_from_server
+        else: # infer if not explicitly set
+            db_document_item.is_from_server = "/static/" in link or link.startswith("static/")
+    elif file_from_server is not None: # only file_from_server is provided
+        db_document_item.is_from_server = file_from_server
+
+
     db_document_item.updated_at = datetime.utcnow()
-    
     db.commit()
     db.refresh(db_document_item)
-    
     return db_document_item
 
 @router.delete("/items/{document_item_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -494,7 +500,7 @@ def read_document_items_by_category(category_id: int, db: Session = Depends(get_
 def search_documents(
     q: str,
     category_id: Optional[int] = None,
-    is_from_server: Optional[bool] = None,
+    file_from_server: Optional[bool] = None,  # Changed from is_from_server
     status: Optional[str] = None,
     skip: int = 0,
     limit: int = 20,
@@ -505,7 +511,7 @@ def search_documents(
     
     - **q**: Search query string
     - **category_id**: Filter by category ID
-    - **is_from_server**: Filter by whether the document is stored on the server
+    - **file_from_server**: Filter by whether the document is stored on the server
     - **status**: Filter by document status
     - **skip**: Number of items to skip (pagination)
     - **limit**: Maximum number of items to return (pagination)
@@ -524,8 +530,8 @@ def search_documents(
         if category_id is not None:
             filter_conditions.append(models.DocumentItem.category_id == category_id)
         
-        if is_from_server is not None:
-            filter_conditions.append(models.DocumentItem.is_from_server == is_from_server)
+        if file_from_server is not None:  # Changed from is_from_server
+            filter_conditions.append(models.DocumentItem.is_from_server == file_from_server)
             
         if status is not None:
             filter_conditions.append(models.DocumentItem.status == status)
@@ -544,7 +550,7 @@ def search_documents(
         # Get total count for pagination info
         total_count = db.query(models.DocumentItem).filter(query_condition).count()
         
-        logger.info(f"Search query '{q}' returned {len(documents)} results with filters: category_id={category_id}, is_from_server={is_from_server}, status={status}")
+        logger.info(f"Search query '{q}' returned {len(documents)} results with filters: category_id={category_id}, file_from_server={file_from_server}, status={status}")
         
         return documents
     

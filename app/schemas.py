@@ -240,14 +240,19 @@ class DocumentItemBase(BaseModel):
     title: str
     name: Optional[str] = None
     link: str
-    is_from_server: Optional[bool] = False
+    file_from_server: Optional[bool] = False
     status: Optional[str] = "active"
+    published_date: Optional[datetime] = None  # New field
 
 class DocumentItem(DocumentItemBase):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
+
+    @property
+    def is_from_server(self) -> bool:
+        return self.file_from_server
+
     class Config:
         from_attributes = True
 
@@ -266,15 +271,20 @@ class AnalyticalDocumentItemBase(BaseModel):
     title: str
     name: Optional[str] = None
     link: str
-    is_from_server: Optional[bool] = False
+    file_from_server: Optional[bool] = False # Changed from is_from_server
     status: Optional[str] = "active"
-    document_type: Optional[str] = None  # Additional field for analytical documents
+    document_type: Optional[str] = None
+    published_date: Optional[datetime] = None  # New field
 
 class AnalyticalDocumentItem(AnalyticalDocumentItemBase):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
+
+    @property
+    def is_from_server(self) -> bool:
+        return self.file_from_server
+
     class Config:
         from_attributes = True
 

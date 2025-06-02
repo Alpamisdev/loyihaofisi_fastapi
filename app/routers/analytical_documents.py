@@ -103,9 +103,11 @@ async def create_analytical_document_item(
     name: Optional[str] = Form(None),
     link: Optional[str] = Form(None),
     status: Optional[str] = Form("active"),
-    document_type: Optional[str] = Form(None),  # New field for analytical documents
+    document_type: Optional[str] = Form(None),
+    published_date: Optional[datetime] = Form(None),  # New field
     file: Optional[UploadFile] = File(None),
     file_url: Optional[str] = Form(None),
+    file_from_server: Optional[bool] = Form(False),
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
@@ -126,101 +128,71 @@ async def create_analytical_document_item(
     
     # If multiple options are provided, prioritize in this order: file, file_url, link
     final_link = None
-    is_from_server = False
-    
+    is_from_server_val = file_from_server
+
     # If file is uploaded, save it and generate a link
     if file:
         # Create analytical-documents directory if it doesn't exist
-        os.makedirs("static/analytical-documents", exist_ok=True)
-        
-        # Save the file
+        os.makedirs("static/analytical-documents", exist_ok=True) # Ensure directory exists
         success, error_msg, file_path, file_size, mime_type = await save_upload_file(
-            file, folder="analytical-documents", convert_to_webp=False
+            file, folder="analytical_documents", convert_to_webp=False
         )
-        
         if not success:
             raise HTTPException(status_code=500, detail=f"Failed to save file: {error_msg}")
         
-        # Generate file URL
-        file_url = get_file_url(file_path)
+        final_link = get_file_url(file_path)
+        if not name: name = file.filename
+        is_from_server_val = True
         
-        # Use the original filename if name is not provided
-        if not name:
-            name = file.filename
-        
-        # Set the link to the file URL
-        final_link = file_url
-        is_from_server = True
-        
-        # Create uploaded file record
-        db_file = models.UploadedFile(
+        db_file_record = models.UploadedFile( # Assuming a generic UploadedFile model
             filename=os.path.basename(file_path),
             original_filename=file.filename,
             file_path=file_path,
-            file_url=file_url,
+            file_url=final_link,
             file_size=file_size,
             mime_type=mime_type,
             uploaded_by=current_user.id
         )
-        db.add(db_file)
-    
-    # If file_url is provided (URL to already uploaded file)
+        db.add(db_file_record)
     elif file_url:
-        # Validate the URL
         try:
             parsed_url = urlparse(file_url)
             if not parsed_url.scheme or not parsed_url.netloc:
                 raise HTTPException(status_code=400, detail="Invalid file URL format")
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid file URL")
-        
-        # Use the provided URL directly
         final_link = file_url
-        
-        # Check if it's a server file
-        is_from_server = "/static/" in file_url or file_url.startswith("static/")
-        
-        # Extract filename from URL for name if not provided
-        if not name:
-            name = os.path.basename(parsed_url.path)
-    
-    # If link is provided (external link)
+        if file_from_server is None:
+             is_from_server_val = "/static/" in file_url or file_url.startswith("static/")
+        if not name: name = os.path.basename(parsed_url.path)
     elif link:
-        # Validate the URL
         try:
             parsed_url = urlparse(link)
             if not parsed_url.scheme or not parsed_url.netloc:
                 raise HTTPException(status_code=400, detail="Invalid link format")
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid link")
-        
-        # Use the provided link directly
         final_link = link
-        
-        # Check if it's a server file
-        is_from_server = "/static/" in link or link.startswith("static/")
-        
-        # Extract filename from URL for name if not provided
-        if not name:
-            name = os.path.basename(parsed_url.path)
-    
-    # Create analytical document item
-    db_document_item = models.AnalyticalDocumentItem(
+        if file_from_server is None:
+            is_from_server_val = "/static/" in link or link.startswith("static/")
+        if not name: name = os.path.basename(parsed_url.path)
+
+    db_analytical_item = models.AnalyticalDocumentItem(
         category_id=category_id,
         title=title,
         name=name,
         link=final_link,
-        is_from_server=is_from_server,
+        is_from_server=is_from_server_val,
         status=status,
-        document_type=document_type,  # Set the document_type field
+        document_type=document_type,
+        published_date=published_date,  # Save the published_date
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow()
     )
-    db.add(db_document_item)
+    db.add(db_analytical_item)
     db.commit()
-    db.refresh(db_document_item)
-    
-    return db_document_item
+    db.refresh(db_analytical_item)
+    return db_analytical_item
 
 @router.get("/items/", response_model=List[schemas.AnalyticalDocumentItem])
 def read_analytical_document_items(
@@ -360,6 +332,7 @@ async def download_analytical_document(document_item_id: int, db: Session = Depe
             "title": db_document_item.title,
             "name": db_document_item.name,
             "document_type": db_document_item.document_type,
+            "published_date": db_document_item.published_date,  # Include published_date in response
             "is_external": True,
             "is_from_server": db_document_item.is_from_server,
             "status": db_document_item.status,
@@ -367,106 +340,85 @@ async def download_analytical_document(document_item_id: int, db: Session = Depe
             "message": "This is an external document. Use the URL to access it."
         }
 
-@router.put("/items/{document_item_id}", response_model=schemas.AnalyticalDocumentItem)
+@router.put("/items/{item_id}", response_model=schemas.AnalyticalDocumentItem)
 async def update_analytical_document_item(
-    document_item_id: int,
+    item_id: int,
     background_tasks: BackgroundTasks,
     category_id: Optional[int] = Form(None),
     title: Optional[str] = Form(None),
     name: Optional[str] = Form(None),
     link: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
-    document_type: Optional[str] = Form(None),  # New field for analytical documents
+    document_type: Optional[str] = Form(None),
+    published_date: Optional[datetime] = Form(None),  # New field
     file: Optional[UploadFile] = File(None),
     file_url: Optional[str] = Form(None),
+    file_from_server: Optional[bool] = Form(None),
     db: Session = Depends(get_db),
     current_user: models.AdminUser = Depends(auth.get_current_user)
 ):
-    db_document_item = db.query(models.AnalyticalDocumentItem).filter(models.AnalyticalDocumentItem.id == document_item_id).first()
-    if db_document_item is None:
+    db_item = db.query(models.AnalyticalDocumentItem).filter(models.AnalyticalDocumentItem.id == item_id).first()
+    if db_item is None:
         raise HTTPException(status_code=404, detail="Analytical document item not found")
-    
-    # Update category if provided
+
     if category_id is not None:
         db_category = db.query(models.AnalyticalDocumentCategory).filter(models.AnalyticalDocumentCategory.id == category_id).first()
         if not db_category:
             raise HTTPException(status_code=404, detail="Analytical document category not found")
-        db_document_item.category_id = category_id
-    
-    # Update title if provided
-    if title is not None:
-        db_document_item.title = title
-    
-    # Update name if provided
-    if name is not None:
-        db_document_item.name = name
-        
-    # Update status if provided
-    if status is not None:
-        db_document_item.status = status
-        
-    # Update document_type if provided
-    if document_type is not None:
-        db_document_item.document_type = document_type
-    
-    # If file is uploaded, save it and update the link
+        db_item.category_id = category_id
+    if title is not None: db_item.title = title
+    if name is not None: db_item.name = name
+    if status is not None: db_item.status = status
+    if document_type is not None: db_item.document_type = document_type
+    if published_date is not None: db_item.published_date = published_date # Update published_date
+
+    # Handle file update logic
     if file:
-        # Create analytical-documents directory if it doesn't exist
-        os.makedirs("static/analytical-documents", exist_ok=True)
-        
-        # Save the file
+        os.makedirs("static/analytical_documents", exist_ok=True)
         success, error_msg, file_path, file_size, mime_type = await save_upload_file(
-            file, folder="analytical-documents", convert_to_webp=False
+            file, folder="analytical_documents", convert_to_webp=False
         )
-        
         if not success:
             raise HTTPException(status_code=500, detail=f"Failed to save file: {error_msg}")
         
-        # Generate file URL
-        file_url = get_file_url(file_path)
+        db_item.link = get_file_url(file_path)
+        db_item.is_from_server = True
         
-        # Update the link to the file URL
-        db_document_item.link = file_url
-        db_document_item.is_from_server = True
-        
-        # Create uploaded file record
-        db_file = models.UploadedFile(
+        db_file_record = models.UploadedFile(
             filename=os.path.basename(file_path),
             original_filename=file.filename,
             file_path=file_path,
-            file_url=file_url,
+            file_url=db_item.link,
             file_size=file_size,
             mime_type=mime_type,
             uploaded_by=current_user.id
         )
-        db.add(db_file)
-    
-    # If file_url is provided (URL to already uploaded file)
+        db.add(db_file_record)
     elif file_url:
-        # Validate the URL
         try:
             parsed_url = urlparse(file_url)
             if not parsed_url.scheme or not parsed_url.netloc:
                 raise HTTPException(status_code=400, detail="Invalid file URL format")
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid file URL")
-        
-        # Update the link to the provided URL
-        db_document_item.link = file_url
-        db_document_item.is_from_server = "/static/" in file_url or file_url.startswith("static/")
-    
-    # Update link if provided and no file is uploaded
+        db_item.link = file_url
+        if file_from_server is not None:
+            db_item.is_from_server = file_from_server
+        else:
+            db_item.is_from_server = "/static/" in file_url or file_url.startswith("static/")
     elif link is not None:
-        db_document_item.link = link
-        db_document_item.is_from_server = "/static/" in link or link.startswith("static/")
-    
-    # Update the updated_at timestamp
-    db_document_item.updated_at = datetime.utcnow()
-    
+        db_item.link = link
+        if file_from_server is not None:
+            db_item.is_from_server = file_from_server
+        else:
+            db_item.is_from_server = "/static/" in link or link.startswith("static/")
+    elif file_from_server is not None:
+        db_item.is_from_server = file_from_server
+        
+    db_item.updated_at = datetime.utcnow()
     db.commit()
-    db.refresh(db_document_item)
-    
-    return db_document_item
+    db.refresh(db_item)
+    return db_item
 
 @router.delete("/items/{document_item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_analytical_document_item(
